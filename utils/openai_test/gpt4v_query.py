@@ -9,8 +9,11 @@ def encode_image(image_path):
     sev_images = os.listdir(image_path)
     all_images = []
     for image in sev_images:
-        with open(os.path.join(image_path,image), "rb") as image_file:
-            all_images.append(base64.b64encode(image_file.read()).decode('utf-8'))
+        if '.jpg' in image or '.png' in image: #filter readme.md
+            with open(os.path.join(image_path,image), "rb") as image_file:
+                all_images.append(base64.b64encode(image_file.read()).decode('utf-8'))
+        else:
+            pass
     return all_images
 
 

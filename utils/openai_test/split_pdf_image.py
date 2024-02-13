@@ -7,14 +7,14 @@ from pdf2image import convert_from_path
 
 
 # PDF 파일을 이미지로 변환
-pdf_file = '/data/IKEA/dataset/Furniture/Beds/90371954/manual/gulliver-cot-white__AA-1989121-3.pdf'
+pdf_file = '/SeqMMLearning/utils/openai_test/lack-tv-bench-black__AA-1908937-7-2.pdf'
 images = convert_from_path(pdf_file)
 
 # Define the maximum dimension (512x512)
 max_dimension = 512
 
 # create save folder
-save_folder = '/openai_test/playground/'
+save_folder = '/SeqMMLearning/utils/openai_test/playground'
 if not os.path.exists(save_folder):
     os.mkdir(save_folder)
 
