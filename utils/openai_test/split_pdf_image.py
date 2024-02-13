@@ -14,7 +14,7 @@ images = convert_from_path(pdf_file)
 max_dimension = 512
 
 # create save folder
-save_folder = '/openai_test/test/'
+save_folder = '/openai_test/playground/'
 if not os.path.exists(save_folder):
     os.mkdir(save_folder)
 
