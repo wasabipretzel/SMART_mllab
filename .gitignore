@@ -1,0 +1,11 @@
+# Python
+__pycache__
+*.pyc
+*.egg-info
+
+# Other
+.DS_Store
+wandb
+
+checkpoints/*
+utils/openai_test/playground/*
