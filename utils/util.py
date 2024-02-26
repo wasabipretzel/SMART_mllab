@@ -113,12 +113,90 @@ def gen_num2vid_map():
         json.dump(result, f)
     return
 
+def split_list(lst, segment_size):
+    return [lst[i:i+segment_size] for i in range(0, len(lst), segment_size)]
 
+def save_list_to_txt(lst, file_path):
+    with open(file_path, 'w') as f:
+        for item in lst:
+            f.write(str(item) + '\n')
+
+def split_manuals_into_api_num():
+    # get all manuals
+    with open('/data/dataset/mapping/vid_valid_mapping.json', 'r') as f:
+        all_manual_data = json.load(f)
     
+    all_manuals = list(all_manual_data.keys())
+
+    # breakpoint()
+    segment_size = len(all_manuals) // 7
+    segments = split_list(all_manuals, segment_size) #[[12323, 121212,..], [121212,31232,..]..]
+
+    # breakpoint()
+    with open('/data/dataset/mapping/openai_api_genlist.json', 'r') as f:
+        openai_genlist = json.load(f)
     
+    for idx, seg in enumerate(segments):
+        openai_genlist[f"API_{idx+1}"]["manuals"] = seg
+    
+    # NOTE 잘못 돌릴 경우를 대비해 주석처리
+    # with open('/data/dataset/mapping/openai_api_genlist.json', 'w') as f:
+    #     json.dump(openai_genlist, f)
+
+
+
+def single_api_num():
+    with open('/data/dataset/mapping/vid_valid_mapping.json', 'r') as f:
+        all_manual_data = json.load(f)
+    
+    all_manuals = list(all_manual_data.keys())
+
+    result = {}
+
+    result[f"API_1"] = {
+        "api" : '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',
+        'manuals' : all_manuals
+    }
+    
+    with open('/data/dataset/mapping/single_api_genlist.json', 'w') as f:
+        json.dump(result, f)
+
+    return 
+
+
+def mult_api_same_all_manuals():
+    with open('/data/dataset/mapping/vid_valid_mapping.json', 'r') as f:
+        all_manual_data = json.load(f)
+    
+    #get reference api files
+    with open('/data/dataset/mapping/openai_api_key_jw.json', 'r') as f:
+        api_keys = json.load(f)
+    
+    keys = []
+    for k, v in api_keys.items():
+        keys.append(v["api"])
+    
+    all_manuals = list(all_manual_data.keys())
+
+    result = {}
+
+    for idx, key in enumerate(keys):
+        result[f"API_{idx+1}"] = {
+            "api" : key,
+            "manuals" : all_manuals
+        }
+    
+    with open('/data/dataset/mapping/multiple_api_all_manual_genlist.json', 'w') as f:
+        json.dump(result, f)
+
+    return 
 
 
 
 if __name__ == '__main__':
     # generate_mapping()
     # gen_num2vid_map()
+    # split_manuals_into_api_num()
+
+    # single_api_num()
+    # mult_api_same_all_manuals()
