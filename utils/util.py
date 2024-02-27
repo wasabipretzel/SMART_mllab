@@ -193,6 +193,72 @@ def mult_api_same_all_manuals():
 
 
 
+def merge_response_into_one():
+    """
+        생성한 1~6 카테고리 결과들을 모아
+        dataset/split  아래에 data.json 으로 저장
+        이 data.json 의 key값들 중 8:2 비율로 random split하여 train, val txt 생성
+    """
+    cat_num = [1,2,3,4,5,6]
+    input_folder = "/data/generate/qa_annot/single_turn"
+    save_folder = "/data/dataset/split"
+    candidate = os.listdir(input_folder)
+
+    input_jsons = []
+    for each_candid in candidate:
+        if 'error' not in each_candid:
+            input_jsons.append(each_candid)
+    
+    all_qas = []
+    # {id , content} 을 key로 하는 dict들을 append하는 list을 생성
+    for each_json in input_jsons:
+        each_path = os.path.join(input_folder, each_json)
+        with open(each_path, 'r') as f:
+            catqa = json.load(f)
+        for each_serial in catqa.keys():
+            serial_id = each_serial
+            msg = catqa[serial_id]["choices"][0]["message"]["content"]
+            all_qas.append(
+                {
+                    "id" : serial_id,
+                    "content" : msg
+                }
+            )
+    
+    #all_qas을 enumerate돌면서 result에 등록
+    result = {}
+    for idx, qadict in enumerate(all_qas):
+        result[idx] = qadict
+
+    with open(os.path.join(save_folder, 'data.json'), 'w') as f:
+        json.dump(result, f)
+    
+    #random sample train and val
+    import random
+
+    target_list = list(result.keys())
+    tot_len = len(target_list)
+    train_len  = int(tot_len*0.8)
+
+    train_list = random.sample(target_list, train_len)
+
+    val_list = [item for item in target_list if item not in train_list]
+
+    # Open the file in write mode
+    with open(os.path.join(save_folder, 'train.txt'), 'w') as file:
+        # Write each item of the list to the file
+        for item in train_list:
+            file.write('%s\n' % item)
+
+    with open(os.path.join(save_folder, 'val.txt'), 'w') as file:
+        # Write each item of the list to the file
+        for item in val_list:
+            file.write('%s\n' % item)
+
+
+    return
+
+
 if __name__ == '__main__':
     # generate_mapping()
     # gen_num2vid_map()
@@ -200,3 +266,4 @@ if __name__ == '__main__':
 
     # single_api_num()
     # mult_api_same_all_manuals()
+    merge_response_into_one()
