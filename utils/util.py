@@ -224,7 +224,7 @@ def merge_response_into_one():
                     "content" : msg
                 }
             )
-    
+
     #all_qas을 enumerate돌면서 result에 등록
     result = {}
     for idx, qadict in enumerate(all_qas):

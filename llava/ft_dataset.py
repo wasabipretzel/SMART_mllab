@@ -114,13 +114,15 @@ class Model(Blip2Base):
 
         #image / text input, attention mask expand
         image_embeds = image_embeds.reshape(B*max_img, num_token, D) #[B*max_img, num_token, D]
-        images_atts = images_atts.reshape(B*max_img, -1)
+        images_atts = images_atts.reshape(B*max_img, -1) #[B*max_img, num_token]
         text_input_expand = text_input.repeat_interleave(max_img,dim=0) #[B*max_img, maxSeq] #NOTE 이거 [1,2,3]이면 [1,1,1, 2,2,2, 3,3,3] 이런식으로 반복해야하는데 맞게 들어가는지 확인해야함
         text_atts_expand = text_atts.repeat_interleave(max_img,dim=0) #NOTE 이것도 확인해야함
 
         #query token / mask expand, 
         query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1) # [B*max_img, querynum, D]
-        query_atts = torch.ones(query_tokens.size()[:-1], dtype=torch.long).to(image_embeds.device) #[B*max_img, query_num]
+        # query_atts = torch.ones(query_tokens.size()[:-1], dtype=torch.long).to(image_embeds.device) #[B*max_img, query_num] #NOTE 여기도 마스킹 해줘야함!!!
+        #NOTE images_atts에서 maxSeq을 query_num만큼 잘라서 가져오면 될거같음
+        query_atts = images_atts[:,:self.num_query_token]
 
         #get final attention mask
         #qformer attention mask
@@ -138,9 +140,11 @@ class Model(Blip2Base):
 
         #query_output.last_hidden_state[:,:query_tokens.size(1),:] #NOTE 확인한번하기 
 
+        #NOTE [B, max_img*query_token, 768] , mask도 동일하게 처리 
+        output_flatten = query_output.reshape(B, max_img*self.num_query_token, -1) #[B, max_img*self.num_query_token, D]
+        output_mask = query_atts.reshape(B, max_img*self.num_query_token) #[B, max_img*self.num_query_token]
 
-        
-        return query_output #[B*max_img, query_token, 768]
+        return output_flatten, output_mask #[B*max_img, query_token, 768]
 
         
 
