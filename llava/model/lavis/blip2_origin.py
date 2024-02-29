@@ -16,12 +16,12 @@ import torch.distributed as dist
 import torch.nn.functional as F
 
 import sys
-import model.lavis.common.dist_utils as dist_utils
-from model.lavis.common.dist_utils import download_cached_file
-from model.lavis.common.utils import is_url
-from model.lavis.common.logger import MetricLogger
-from model.lavis.models.base_model import BaseModel
-from model.lavis.models.Qformer import BertConfig, BertLMHeadModel
+import llava.model.lavis.common.dist_utils as dist_utils
+from llava.model.lavis.common.dist_utils import download_cached_file
+from llava.model.lavis.common.utils import is_url
+from llava.model.lavis.common.logger import MetricLogger
+from llava.model.lavis.models.base_model import BaseModel
+from llava.model.lavis.models.Qformer import BertConfig, BertLMHeadModel
 # from lavis.models.clip_vit import create_clip_vit_L
 from transformers import BertTokenizer
 
@@ -32,7 +32,7 @@ from transformers import BertTokenizer
 class Blip2Base(BaseModel):
     @classmethod
     def init_tokenizer(cls, truncation_side="right"):
-        tokenizer = BertTokenizer.from_pretrained(bert_base_local, truncation_side=truncation_side)
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', truncation_side=truncation_side)
         # tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
         tokenizer.add_special_tokens({"bos_token": "[DEC]"})
         return tokenizer

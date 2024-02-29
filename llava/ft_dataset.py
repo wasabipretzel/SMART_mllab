@@ -94,6 +94,7 @@ class Model(Blip2Base):
         self.Qformer, self.query_tokens = self.init_Qformer(
             self.num_query_token, visual_width
         )
+        self.tokenizer = init_tokenizer()
         # self.ln_vision = nn.Linear(visual_width, 768)
 
     def forward(self, sample):

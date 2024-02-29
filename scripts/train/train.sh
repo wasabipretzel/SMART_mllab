@@ -1,4 +1,4 @@
-export CUDA_VISIBLE_DEVICES=0
+# export CUDA_VISIBLE_DEVICES=0
 
 /opt/conda/envs/videollava/bin/deepspeed /SeqMMLearning/llava/train/train_mem.py \
     --lora_enable True \
@@ -7,10 +7,12 @@ export CUDA_VISIBLE_DEVICES=0
     --mm_projector_lr 2e-5 \
     --deepspeed /SeqMMLearning/llava/zero3.json \
     --model_name_or_path /SeqMMLearning/checkpoints/llava-v1.5-7b \
+    --mm_projector_model_path /SeqMMLearning/checkpoints/llava-v1.5-7b/mm_projector.bin \
     --train_txt_path /data/dataset/split/train.txt \
     --val_txt_path /data/dataset/split/val.txt \
     --feature_path /data/dataset/features \
     --use_qformer True \
+    --query_num 16 \
     --version sequential_reasoning \
     --data_path /data/dataset/split/data.json \
     --image_folder /data/data2/khahn/LLaVA/playground/data \
@@ -21,14 +23,14 @@ export CUDA_VISIBLE_DEVICES=0
     --bf16 True \
     --output_dir /SeqMMLearning/checkpoints/ft \
     --num_train_epochs 1 \
-    --per_device_train_batch_size 16 \
+    --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
     --evaluation_strategy no \
     --save_strategy steps \
     --save_steps 50000 \
     --save_total_limit 1 \
-    --learning_rate 2e-4 \
+    --learning_rate 1e-6 \
     --weight_decay 0. \
     --warmup_ratio 0.03 \
     --lr_scheduler_type cosine \
@@ -36,6 +38,6 @@ export CUDA_VISIBLE_DEVICES=0
     --tf32 True \
     --model_max_length 2048 \
     --gradient_checkpointing True \
-    --dataloader_num_workers 0 \
+    --dataloader_num_workers 8 \
     --lazy_preprocess True \
     --report_to none \

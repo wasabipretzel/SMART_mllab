@@ -41,28 +41,6 @@ def process_images(images, image_processor, model_cfg):
 
 
 def tokenizer_image_token(prompt, tokenizer, image_token_index=IMAGE_TOKEN_INDEX, return_tensors=None):
-    # # # '<image>' 기준으로 prompt를 general prompt / QA set으로 분리
-    # prompt_chunks = [tokenizer(chunk).input_ids for chunk in prompt.split('<image>')]
-
-    # def insert_separator(X, sep): # 토큰 사이 SEP token [0] 삽입
-    #     return [ele for sublist in zip(X, [sep]*len(X)) for ele in sublist][:-1]
-
-    # input_ids = []
-    # offset = 0
-    # if len(prompt_chunks) > 0 and len(prompt_chunks[0]) > 0 and prompt_chunks[0][0] == tokenizer.bos_token_id:
-    #     offset = 1
-    #     input_ids.append(prompt_chunks[0][0])
-
-    # for x in insert_separator(prompt_chunks, [image_token_index] * (offset + 1)):
-    #     input_ids.extend(x[offset:])
-
-    # if return_tensors is not None:
-    #     if return_tensors == 'pt':
-    #         return torch.tensor(input_ids, dtype=torch.long)
-    #     raise ValueError(f'Unsupported tensor type: {return_tensors}')
-    
-    # t=3
-    #########################################################################################################################################
     if "Question" not in prompt:
         # QA 생성 시 오류가 발생하여 제대로 QA 생성되지 않은 경우
         input_prompt = tokenizer(prompt).input_ids
@@ -70,14 +48,29 @@ def tokenizer_image_token(prompt, tokenizer, image_token_index=IMAGE_TOKEN_INDEX
         return input_ids
         
     else:
+        IMAGE_START = '<im_st>'
+        IMAGE_END = '<im_end>'
+        SEPERATOR = '###'
+        tokenizer.add_tokens(['###', '<im_start>', '<im_end>'])
+
+        sys_msg = prompt.split(IMAGE_START)[0] + IMAGE_START + ' '
+        question = prompt.split(IMAGE_END)[-1].split(SEPERATOR)[0].replace(" ", "")
+        question_answer = IMAGE_END + prompt.split(IMAGE_END)[-1]
+        before_answer = prompt.split(SEPERATOR)[0] + SEPERATOR
+
+        breakpoint()
+
+        # SYS_MSG + QUESTION_ANSWER = TEXT
+
 
         IMAGE_TOKEN_INDEX = -200
         QUESTION_TOKEN_INDEX = -300
         
         split_tag = "<im_start>|<im_end>|###"
+        tokenizer.add_tokens(['###', '<im_start>', '<im_end>'])
         prompt_chunks = re.split(split_tag, prompt)
         prompt_chunks_tokenized = [tokenizer(chunk).input_ids for chunk in prompt_chunks if chunk]  # 비어있지 않은 문자열 조각에 대해 토큰화 수행
- 
+
         IMAGE_TOKEN_INDEX = -200 
         QUESTION_TOKEN_INDEX = -300 
         ANSWER_TOKEN_INDEX = -400

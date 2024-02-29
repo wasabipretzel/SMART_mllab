@@ -15,7 +15,7 @@ import torch
 import torch.distributed as dist
 # from torch.utils.tensorboard import SummaryWriter
 
-from model.lavis.common import dist_utils
+from llava.model.lavis.common import dist_utils
 
 
 class SmoothedValue(object):
