@@ -682,17 +682,36 @@ def train():
             cache_dir=training_args.cache_dir,
             **bnb_model_from_pretrained_args
         )
+
+        print(f"llm device : {llm.device}")
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=False,
+        )
+
+        # from transformers import Blip2QFormerConfig, Blip2QFormerModel
+        # configuration_qformer = Blip2QFormerConfig()
+        # qformer = Blip2QFormerModel(configuration_qformer)
         
+        print("initializing")
         #main model initialize
-        model = SequentialMM_Model(llm=llm, query_num=model_args.query_num, args=model_args)
+        model = SequentialMM_Model(llm=llm, query_num=model_args.query_num, args=model_args, device=training_args.device).to(training_args.device)
+        print("model finished")
         model.load_mm_projector_state_dict()
+        print("a")
 
         qf_tokenizer = model.init_tokenizer()
+        print("b")
         tokenizer.add_tokens(['###', '<im_st>', '<im_end>'], special_tokens=True)
         model.llm.resize_token_embeddings(len(tokenizer))
         training_args.gradient_checkpointing=False
+        print("enabling")
         model.llm.gradient_checkpointing_enable()
         model.llm.enable_input_require_grads()
+        print("finished")
 
 
 
@@ -732,25 +751,25 @@ def train():
                 model.llm.to(torch.float16)
         rank0_print("Adding LoRA adapters...")
         model.llm = get_peft_model(model.llm, lora_config) # LlavaLlamaForCausalLM -> PeftModelForCausalLM 모델 변경
-   
+    
     '''
     Prompt
     '''
-    if 'mpt' in model_args.model_name_or_path: # mpt : Pretrained decoder-only transformer
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path, # 
-            cache_dir=training_args.cache_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="right"
-        )
-    else:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="right",
-            use_fast=False,
-        )
+    # if 'mpt' in model_args.model_name_or_path: # mpt : Pretrained decoder-only transformer
+    #     tokenizer = transformers.AutoTokenizer.from_pretrained(
+    #         model_args.model_name_or_path, # 
+    #         cache_dir=training_args.cache_dir,
+    #         model_max_length=training_args.model_max_length,
+    #         padding_side="right"
+    #     )
+    # else:
+    #     tokenizer = transformers.AutoTokenizer.from_pretrained(
+    #         model_args.model_name_or_path,
+    #         cache_dir=training_args.cache_dir,
+    #         model_max_length=training_args.model_max_length,
+    #         padding_side="right",
+    #         use_fast=False,
+    #     )
 
     if model_args.version == "v0":
         if tokenizer.pad_token is None:
@@ -840,6 +859,7 @@ def train():
     # breakpoint()
 
     print(f"lora params : {model.llm.print_trainable_parameters()}")
+
 
     ## DataLoader
     data_module = make_supervised_data_module(tokenizer=tokenizer,

@@ -4,23 +4,35 @@ from llava.model.lavis.blip2_origin import Blip2Base
 from llava.model.multimodal_projector.builder import build_vision_projector
 from torch import nn
 from transformers import AutoModelForCausalLM
+from transformers import InstructBlipQFormerConfig, InstructBlipQFormerModel
+from transformers import PreTrainedModel
 
 
-
-class SequentialMM_Model(Blip2Base, AutoModelForCausalLM):
-    def __init__(self, llm, query_num, args):
+class SequentialMM_Model(Blip2Base, PreTrainedModel):
+    def __init__(self, llm, query_num, args, device):
         super().__init__()
         self.llm = llm
         self.num_query_token = query_num
-        self.Qformer, self.query_tokens = self.init_Qformer(
-            self.num_query_token, 1024
+        print("init qformer")
+        # self.Qformer, self.query_tokens = self.init_Qformer(
+        #     self.num_query_token, 1024, self.device
+        # )
+        configuration_qformer = InstructBlipQFormerConfig.from_pretrained('Salesforce/instructblip-vicuna-7b')
+        configuration_qformer.encoder_hidden_size=768
+        # breakpoint()
+        self.qformer = InstructBlipQFormerModel(configuration_qformer)
+        self.query_tokens = nn.Parameter(
+            torch.zeros(1, self.num_query_token, configuration_qformer.hidden_size)
         )
+        self.query_tokens.data.normal_(mean=0.0, std=configuration_qformer.initializer_range)
+        print("init qformer finished")
         self.config = self.llm.config
-        self.peft_config = self.llm.peft_config
+        # self.peft_config = self.llm.peft_config
         # self.tokenizer = init_tokenizer()
-        # self.ln_vision = nn.Linear(visual_width, 768)
+        self.ln_vision = nn.Linear(1024, 768)
         self.args = args
         self.qformer_to_mm_projector = nn.Linear(768, 1024)
+        print("build vision projector")
         mm_projector = build_vision_projector(self.llm.config)
         self.mm_projector = mm_projector
     
@@ -50,6 +62,7 @@ class SequentialMM_Model(Blip2Base, AutoModelForCausalLM):
 
         #image / text input, attention mask expand
         image_embeds = image_embeds.reshape(B*max_img, num_token, D) #[B*max_img, num_token, D]
+        image_embeds = self.ln_vision(image_embeds)
         images_atts = images_atts.reshape(B*max_img, -1) #[B*max_img, num_token]
         text_input = text_input.repeat_interleave(max_img,dim=0) #[B*max_img, maxSeq] #NOTE 이거 [1,2,3]이면 [1,1,1, 2,2,2, 3,3,3] 이런식으로 반복해야하는데 맞게 들어가는지 확인해야함
         text_atts = text_atts.repeat_interleave(max_img,dim=0) #NOTE 이것도 확인해야함
@@ -65,7 +78,7 @@ class SequentialMM_Model(Blip2Base, AutoModelForCausalLM):
         qformer_atts = torch.cat([query_atts, text_atts], dim=1) #[B*max_img, query_num + maxSeq]
 
 
-        query_output = self.Qformer.bert(
+        query_output = self.qformer(
             text_input, #[B*max_img, maxSeq]
             attention_mask=qformer_atts, #[B*max_img, query_num + maxSeq]
             query_embeds=query_tokens, #[B*max_img, querynum, D]

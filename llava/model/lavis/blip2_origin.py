@@ -48,12 +48,12 @@ class Blip2Base(BaseModel):
             return contextlib.nullcontext()
 
     @classmethod
-    def init_Qformer(cls, num_query_token, vision_width, cross_attention_freq=2):
+    def init_Qformer(cls, num_query_token, vision_width, device, cross_attention_freq=2):
         ### jskim change load bert config
         encoder_config = BertConfig.from_pretrained("bert-base-uncased")
         ### done
-
-
+        print("qformer1")
+        print(f"device in qformer : {device}")
         #encoder_config = BertConfig.from_pretrained("bert-base-uncased")
         encoder_config.encoder_width = vision_width
         # insert cross-attention layer every other block
@@ -65,7 +65,8 @@ class Blip2Base(BaseModel):
         # vicuna = "/home/work/nlp_ssd/blip2_LAVIS/pretrained_models/instruct_blip_vicuna7b_trimmed.pth"
         Qformer = BertLMHeadModel.from_pretrained(
             'bert-base-uncased', config=encoder_config
-        )
+        ).to(device)
+        print("qformer2")
         # Qformer = BertLMHeadModel.load_state_dict(torch.load(vicuna))
         ### done
         # Qformer = BertLMHeadModel.from_pretrained(
