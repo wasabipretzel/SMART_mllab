@@ -8,7 +8,7 @@ from transformers import InstructBlipQFormerConfig, InstructBlipQFormerModel
 from transformers import PreTrainedModel
 
 
-class SequentialMM_Model(Blip2Base, PreTrainedModel):
+class SequentialMM_Model(Blip2Base):
     def __init__(self, llm, query_num, args, device):
         super().__init__()
         self.llm = llm

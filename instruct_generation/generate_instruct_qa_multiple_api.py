@@ -169,8 +169,12 @@ def fewshot_singlecase_annotation(args, manual_num, annot=None):
     with open(fewshot_sample_path, 'r') as f:
         fewshotqa = json.load(f)
 
-    question = fewshotqa[f"cat{args.category_type}"]["question"]
-    answer = fewshotqa[f"cat{args.category_type}"]["answer"]
+    question1 = fewshotqa[f"cat{args.category_type}"][0]["question"]
+    answer1 = fewshotqa[f"cat{args.category_type}"][0]["answer"]
+
+    question2 = fewshotqa[f"cat{args.category_type}"][1]["question"]
+    answer2 = fewshotqa[f"cat{args.category_type}"][1]["answer"]
+
 
 
     msg = [
@@ -236,7 +240,14 @@ def fewshot_singlecase_annotation(args, manual_num, annot=None):
     msg[1]["content"].append(
         {
             "type" : "text",
-            "text" : f"Question :\n{question}\n===\n Answer : \n{answer}\n"
+            "text" : f"Question :\n{question1}\n===\n Answer : \n{answer1}\n"
+        }
+    )
+
+    msg[1]["content"].append(
+        {
+            "type" : "text",
+            "text" : f"Question :\n{question2}\n===\n Answer : \n{answer2}\n"
         }
     )
 

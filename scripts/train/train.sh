@@ -1,4 +1,4 @@
-# export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=0,1,2
 
 /opt/conda/envs/videollava/bin/deepspeed /SeqMMLearning/llava/train/train_mem.py \
     --lora_enable True \
@@ -23,7 +23,7 @@
     --bf16 True \
     --output_dir /SeqMMLearning/checkpoints/ft \
     --num_train_epochs 1 \
-    --per_device_train_batch_size 2 \
+    --per_device_train_batch_size 3 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
     --evaluation_strategy no \

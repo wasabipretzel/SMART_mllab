@@ -1,26 +1,33 @@
+
 {
-    "cat1" : {
-        "question" : "Explain detailed description of step 7 (page 9).",
-        "answer" : "Step 7 is the process of securing the attachment between two frames of the bed frame. Since attaching two frames with nut sleeves is not secure, step 7 indicates using a wheel lock and securing with a hex wrench."
-    },
-    "cat2" : {
-        "question" : "In step 9 (page 11), what is the diagram located at the top mean?",
-        "answer" : "Step 9 illustrates the process of joining the two frames together. The diagram at the top shows how to use the wheel lock during the assembly. After aligning the arrow on the wheel lock with the direction of joining, simply tighten the two frames using a hex wrench as instructed."
-    },
-    "cat3" : {
-        "question" : "What happened to the furniture during step 14 (page 15) and 15 (page 16)? What is changed?",
-        "answer" : "Steps 14 and 15 are part of the assembly process for the bed. In Step 14, the bed's legs were lying flat, facing upward, but in Step 15, they are standing upright in the correct position. Additionally, at the top of Step 15, there are images showing the bed being flipped over and a frame being added to support the mattress, indicating that between these two steps, the bed was flipped, and an additional frame was added and secured to support the mattress."
-    },
-    "cat4" : {
-        "question" : "At the center of step 12 (page 13), there is a error prevention diagram. What does it means?",
-        "answer" : "Step 12 involves attaching an X-shaped wire to maintain tension between the two frames. The error prevention diagram in the middle warns against using incorrect screws during attachment, instructing to use short screws instead of long ones."
-    },
-    "cat5" : {
-       "question" : "On the first page, there is an image of the finished furniture. In which step or from which step to which step is the scene where the bed slats are attached to the main bed frame?",
-       "answer" : "Steps attaching the bed slats are shown in the step 15 (page 16) to step 16 (page 17)."
-    },
-    "cat6" : {
-        "question" : "What would be the short-term or long-term consequences if step 1 (page 4) is omitted during assembly?",
-        "answer" : "Step 1 represents inserting the screws (serial number 115348) into the leg of the bed. Since these screws are tightened with wheel locks at step 4 (page 6), if these steps are omitted, the leg part and bed frames are not securely tightened."
-    }
+    "cat1": [
+        {
+            "question": "Explain detailed description of step 7 (page 9).",
+            "answer": "Step 7 is the process of securing the attachment between two frames of the bed frame. Since attaching two frames with nut sleeves is not secure, step 7 indicates using a wheel lock and securing with a hex wrench."
+        },
+        {
+            "question": "Explain detailed description of step 13 (page 14).",
+            "answer": "At the top left of the picture, the assembly materials for assembly at this stage, such as screws, are diagrammed. Step 13 uses two additional diagonal braces to assemble the bed frame, creating an X-shape within the rectangle for added stability. An additional step is to secure it with screws to the edge of the bed."
+        }
+    ],
+    "cat3": [
+        {
+            "question": "What happened to the furniture during step 14 (page 15) and step 15 (page 16)? What is changed?",
+            "answer": "Steps 14 and 15 are part of the assembly process for the bed. In Step 14, the bed's legs were lying flat, facing upward, but in Step 15, they are standing upright in the correct position. Additionally, at the top of Step 15, there are images showing the bed being flipped over and a frame being added to support the mattress, indicating that between these two steps, the bed was flipped, and an additional frame was added and secured to support the mattress."
+        },
+        {
+            "question": "What happened to the furniture during step 5 (page 7) and step 6 (page 8)? What is changed?",
+            "answer": "In Step 5, assemble the top and bottom frames of the bed by turning the cam wheel locks (serial part number 115349) clockwise using the hex wrench. After completing Step 5, proceed to Step 6 to connect the upper and lower frames and side frames assembled in Step 5 using wooden dowel (serial part number 101352)."
+        }
+    ],
+    "cat6": [
+        {
+            "question": "What would be the short-term or long-term consequences if step 1 (page 4) is omitted during assembly?",
+            "answer": "Step 1 represents inserting the screws (serial number 115348) into the leg of the bed. Since these screws are tightened with wheel locks at step 4 (page 6), if these steps are omitted, the leg part and bed frames are not securely tightened."
+        },
+        {
+            "question": "What would be the short-term or long-term consequences if step 12 (page 13) is omitted during assembly?",
+            "answer": "Step 12 is the step of fixing the x-band to the bed with screws. The x-band plays a role in helping bear the load of the bed. If this step is omitted, the bed may easily collapse if an object or person with a heavy load is placed on it."
+        }
+    ]
 }
