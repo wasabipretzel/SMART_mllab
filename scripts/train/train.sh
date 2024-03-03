@@ -1,13 +1,17 @@
-export CUDA_VISIBLE_DEVICES=0,1,2
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+# export CUDA_VISIBLE_DEVICES=0
 
 /opt/conda/envs/videollava/bin/deepspeed /SeqMMLearning/llava/train/train_mem.py \
     --lora_enable True \
-    --lora_r 128 \
-    --lora_alpha 256 \
+    --lora_r 4 \
+    --lora_alpha 8 \
     --mm_projector_lr 2e-5 \
     --deepspeed /SeqMMLearning/llava/zero3.json \
     --model_name_or_path /SeqMMLearning/checkpoints/llava-v1.5-7b \
     --mm_projector_model_path /SeqMMLearning/checkpoints/llava-v1.5-7b/mm_projector.bin \
+    --pretrained_qformer_path /data/pretrained_models/qformer_pretrained \
+    --pretrained_qformer_tokenizer_path /data/pretrained_models/qformer_pretrained/qformer_tokenizer \
+    --use_pretrained_qformer True \
     --train_txt_path /data/dataset/split/train.txt \
     --val_txt_path /data/dataset/split/val.txt \
     --feature_path /data/dataset/features \
@@ -21,16 +25,17 @@ export CUDA_VISIBLE_DEVICES=0,1,2
     --mm_vision_select_layer -2 \
     --image_aspect_ratio pad \
     --bf16 True \
-    --output_dir /SeqMMLearning/checkpoints/ft \
-    --num_train_epochs 1 \
+    --output_dir /data/ckpt \
+    --num_train_epochs 100 \
     --per_device_train_batch_size 3 \
-    --per_device_eval_batch_size 4 \
+    --per_device_eval_batch_size 3 \
     --gradient_accumulation_steps 1 \
-    --evaluation_strategy no \
+    --evaluation_strategy steps \
+    --eval_steps 100 \
     --save_strategy steps \
-    --save_steps 50000 \
-    --save_total_limit 1 \
-    --learning_rate 1e-6 \
+    --save_steps 1000 \
+    --save_total_limit 20 \
+    --learning_rate 1e-5 \
     --weight_decay 0. \
     --warmup_ratio 0.03 \
     --lr_scheduler_type cosine \
@@ -40,4 +45,4 @@ export CUDA_VISIBLE_DEVICES=0,1,2
     --gradient_checkpointing True \
     --dataloader_num_workers 8 \
     --lazy_preprocess True \
-    --report_to none \
+    --report_to wandb

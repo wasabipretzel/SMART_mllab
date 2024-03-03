@@ -69,7 +69,9 @@ class ModelArguments:
     use_qformer: bool = True
     query_num: Optional[int] = field(default=16)
     mm_projector_model_path: Optional[str] = field(default='/SeqMMLearning/checkpoints/llava-v1.5-7b/mm_projector.bin')
-
+    use_pretrained_qformer: bool = field(default=False)
+    pretrained_qformer_path: str = field(default="/data/pretrained_models/qformer_pretrained")
+    pretrained_qformer_tokenizer_path: str = field(default="/data/pretrained_models/qformer_pretrained/qformer_tokenizer")
 
 @dataclass
 class DataArguments:
@@ -119,7 +121,10 @@ class TrainingArguments(transformers.TrainingArguments):
     lora_weight_path: str = ""
     lora_bias: str = "none"
     mm_projector_lr: Optional[float] = None
+    
     group_by_modality_length: bool = field(default=False)
+
+
 
 
 def maybe_zero_3(param, ignore_status=False, name=None):
@@ -289,7 +294,7 @@ def _add_speaker_and_signal_assembly(header, source, get_conversation=True):
     BEGIN_SIGNAL = "### "
     END_SIGNAL = "\n"
     conversation = header
-    conversation = "<im_start> <im_end> " + conversation
+    conversation = "<im_st> <im_end> " + conversation
     source = " ### " + source
     source = source.replace("Answer", " ### Answer")
     conversation = conversation + source 
@@ -702,8 +707,8 @@ def train():
         print("model finished")
         model.load_mm_projector_state_dict()
         print("a")
-
-        qf_tokenizer = model.init_tokenizer()
+        qf_tokenizer = AutoTokenizer.from_pretrained(model_args.pretrained_qformer_tokenizer_path)
+        # qf_tokenizer = model.init_tokenizer()
         print("b")
         tokenizer.add_tokens(['###', '<im_st>', '<im_end>'], special_tokens=True)
         model.llm.resize_token_embeddings(len(tokenizer))
@@ -871,7 +876,7 @@ def train():
                     args=training_args,
                     **data_module)
 
-    if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
+    if list(pathlib.Path(training_args.output_dir).glob("tldr-*")):
         trainer.train(resume_from_checkpoint=True)
     else:
         trainer.train()

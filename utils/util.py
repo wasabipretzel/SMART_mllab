@@ -193,7 +193,7 @@ def mult_api_same_all_manuals():
 
 
 
-def merge_response_into_one():
+def merge_response_into_one(): 
     """
         생성한 1~6 카테고리 결과들을 모아
         dataset/split  아래에 data.json 으로 저장
@@ -259,6 +259,100 @@ def merge_response_into_one():
     return
 
 
+def split_train_val():
+    """
+        train : val = 8 : 2
+    """
+    import random
+    
+    with open('/data/dataset/split/data.json', 'r') as f:
+        data = json.load(f)
+
+    save_path = "/data/dataset/split"
+
+    candidates = list(data.keys())
+
+    random.shuffle(candidates)
+
+    # 8:2 비율로 분할
+    split_index = int(len(candidates) * 0.8)
+    train_set = candidates[:split_index]
+    val_set = candidates[split_index:]
+
+    print("Train set:", len(train_set))
+    print("Test set:", len(val_set))
+
+    save_list_to_txt(train_set, os.path.join(save_path, 'train.txt'))
+    save_list_to_txt(val_set, os.path.join(save_path, 'val.txt'))
+
+
+
+def merge_error_handler_into_one():
+    base_path = "/data/generate/qa_annot/error_handler"
+    cat_num = [1,3,6]
+    input_folder = "/data/generate/qa_annot/error_handler"
+    save_folder = "/data/dataset/split"
+    candidate = os.listdir(input_folder)
+
+    input_jsons = []
+    for each_candid in candidate:
+        if 'error' not in each_candid:
+            input_jsons.append(each_candid)
+    
+    all_qas = []
+    # {id , content} 을 key로 하는 dict들을 append하는 list을 생성
+    for each_json in input_jsons:
+        each_path = os.path.join(input_folder, each_json)
+        with open(each_path, 'r') as f:
+            catqa = json.load(f)
+        for each_serial in catqa.keys():
+            serial_id = each_serial
+            msg = catqa[serial_id]["choices"][0]["message"]["content"]
+            all_qas.append(
+                {
+                    "id" : serial_id,
+                    "content" : msg
+                }
+            ) 
+
+    result = {}
+    for idx, qadict in enumerate(all_qas):
+        result[idx] = qadict
+
+    with open(os.path.join(save_folder, 'error_merged.json'), 'w') as f:
+        json.dump(result, f)
+
+    return
+
+
+def merge_into_one_data():
+    with open('/data/dataset/split/data.json', 'r') as f:
+        legacy = json.load(f)
+    
+    with open('/data/dataset/split/preprocessed_error_data.json', 'r') as f:
+        newone = json.load(f)
+    
+    # key를 새로 만들어야함
+    last_key_legacy = list(legacy.keys())[-1]
+
+    start_key = str(int(last_key_legacy)+1)
+
+    #새로운 value들 담아놓기
+    new_val = []
+    for k, v in newone.items():
+        new_val.append(v)
+
+    for val in new_val:
+        legacy[start_key] = val
+        start_key = str(int(start_key)+1)
+
+    with open('/data/dataset/split/new_data.json', 'w') as f:
+        json.dump(legacy, f)
+
+    return
+
+
+
 if __name__ == '__main__':
     # generate_mapping()
     # gen_num2vid_map()
@@ -266,4 +360,9 @@ if __name__ == '__main__':
 
     # single_api_num()
     # mult_api_same_all_manuals()
-    merge_response_into_one()
+    # merge_response_into_one()
+    split_train_val()
+
+    # merge_error_handler_into_one()
+
+    # merge_into_one_data()
