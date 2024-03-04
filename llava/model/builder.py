@@ -183,16 +183,19 @@ def load_pretrained_ckpt(model_path, model_base):
     """
         model_path : 새로 저장된 ckpt 폴더
         model_base : 맨 처음 llava ckpt폴더 (토크나이저 load위해 필요)
+
+        순서 : 기본 llm load -> lora아닌 weight들 load -> lora ckpt 에서 쓸데없는 key값들 제거 -> lora load
     """
     lora_cfg_pretrained = AutoConfig.from_pretrained(model_path)
     tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
+    # 실제 inference시에는 qformer tokenizer도 load해야됨!
     print('Loading LLaVA from base model...')
-    llm = LlamaForCausalLM.from_pretrained(
+    llm = LlamaForCausalLM.from_pretrained( # 기본 llm load-> 여기에 lora아닌거, lora인거 붙혀서 load할거임
             model_base,
             config=lora_cfg_pretrained,
             )
 
-    model_args = DotDict({
+    model_args = DotDict({ #학습때 사용했던 arg들 만들어놓음 
         "use_pretrained_qformer" : True,
         "pretrained_qformer_path" : "/data/pretrained_models/qformer_pretrained",
         "pretrained_qformer_tokenizer_path" : "/data/pretrained_models/qformer_pretrained/qformer_tokenizer",
@@ -200,19 +203,19 @@ def load_pretrained_ckpt(model_path, model_base):
 
     })
     from sequence_mm import SequentialMM_Model
-    model = SequentialMM_Model(llm=llm, query_num=32, args=model_args, device='cpu')
-    non_lora_trainables = torch.load(os.path.join(model_path, 'non_lora_trainables.bin'), map_location='cpu')
+    model = SequentialMM_Model(llm=llm, query_num=32, args=model_args, device='cpu') #깡통 모델 load
+    non_lora_trainables = torch.load(os.path.join(model_path, 'non_lora_trainables.bin'), map_location='cpu') 
 
-    model.load_state_dict(non_lora_trainables, strict=False)
+    model.load_state_dict(non_lora_trainables, strict=False) # lora아닌애들 올리기
 
-    adapter = torch.load('/data/ckpt/adapter_model.bin', map_location='cpu')
+    adapter = torch.load('/data/ckpt/adapter_model.bin', map_location='cpu') # lora ckpt load
 
-    adapter = {(k.replace("llm.base_model.model", "model.llm") if 'llm.base_model.' in k else k): v for k, v in adapter.items()}
+    adapter = {(k.replace("llm.base_model.model", "model.llm") if 'llm.base_model.' in k else k): v for k, v in adapter.items()} #key 값 이상한거 갈아엎기
 
     print(f"before peft : {count_parameters(model.llm)}")
 
     from peft import PeftModel
-    model.llm = PeftModel.from_pretrained(model.llm, model_path)
+    model.llm = PeftModel.from_pretrained(model.llm, model_path) # peft load해서 모델 llm에 붙이기 
 
     print(f"after peft : {count_parameters(model.llm)}")
 
