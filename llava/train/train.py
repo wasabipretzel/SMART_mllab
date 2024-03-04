@@ -34,6 +34,7 @@ from llava import conversation as conversation_lib
 from llava.model import *
 from llava.mm_utils import tokenizer_image_token
 from itertools import accumulate
+from transformers import AutoTokenizer
 
 import requests
 from PIL import Image
@@ -72,6 +73,8 @@ class ModelArguments:
     use_pretrained_qformer: bool = field(default=False)
     pretrained_qformer_path: str = field(default="/data/pretrained_models/qformer_pretrained")
     pretrained_qformer_tokenizer_path: str = field(default="/data/pretrained_models/qformer_pretrained/qformer_tokenizer")
+    pretrained_qformer_query_token_path: str = field(default="/data/pretrained_models/qformer_pretrained/query_tokens/query_tokens.pth")
+
 
 @dataclass
 class DataArguments:
@@ -121,8 +124,10 @@ class TrainingArguments(transformers.TrainingArguments):
     lora_weight_path: str = ""
     lora_bias: str = "none"
     mm_projector_lr: Optional[float] = None
-    
+    qformer_lr: Optional[float] = None
+
     group_by_modality_length: bool = field(default=False)
+    freeze_pretrained: bool=field(default=False)
 
 
 
@@ -718,6 +723,10 @@ def train():
         model.llm.enable_input_require_grads()
         print("finished")
 
+        #freeze qformer, mm_projector
+        #model.qformer.requires_grad_(False)
+        #model.mm_projector.requires_grad_(False)
+
 
 
     llm.config.use_cache = False
@@ -864,6 +873,10 @@ def train():
     # breakpoint()
 
     print(f"lora params : {model.llm.print_trainable_parameters()}")
+    def count_parameters(model):
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"total params : {count_parameters(model)}")
+
 
 
     ## DataLoader

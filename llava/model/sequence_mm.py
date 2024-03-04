@@ -6,9 +6,10 @@ from torch import nn
 from transformers import AutoModelForCausalLM
 from transformers import InstructBlipQFormerConfig, InstructBlipQFormerModel
 from transformers import PreTrainedModel
+from transformers import AutoTokenizer
 
 
-class SequentialMM_Model(Blip2Base):
+class SequentialMM_Model(nn.Module):
     def __init__(self, llm, query_num, args, device):
         super().__init__()
         self.llm = llm
@@ -24,23 +25,27 @@ class SequentialMM_Model(Blip2Base):
             configuration_qformer.encoder_hidden_size=768
             self.qformer = InstructBlipQFormerModel(configuration_qformer)
             self.ln_vision = nn.Linear(1024, 768)
+            self.query_tokens = nn.Parameter(
+                torch.zeros(1, self.num_query_token, configuration_qformer.hidden_size)
+            )
         else:
             configuration_qformer = InstructBlipQFormerConfig.from_pretrained(args.pretrained_qformer_path)
             self.qformer = InstructBlipQFormerModel.from_pretrained(args.pretrained_qformer_path) #encoder hidden size 1408
+            self.ln_vision = nn.Linear(1024, 1408)
+            self.query_tokens = nn.Parameter(torch.load(args.pretrained_qformer_query_token_path)) #[1, 32, 768]
 
-        self.query_tokens = nn.Parameter(
-            torch.zeros(1, self.num_query_token, configuration_qformer.hidden_size)
-        )
+    
         self.query_tokens.data.normal_(mean=0.0, std=configuration_qformer.initializer_range)
         print("init qformer finished")
         self.config = self.llm.config
         # self.peft_config = self.llm.peft_config
         # self.tokenizer = init_tokenizer()
         self.args = args
-        self.qformer_to_mm_projector = nn.Linear(768, 1024)
+        self.bridge_former_to_projector = nn.Linear(768, 1024)
         print("build vision projector")
         mm_projector = build_vision_projector(self.llm.config)
         self.mm_projector = mm_projector
+        self.device = device
     
     def load_mm_projector_state_dict(self):
         mm_projector_state_dict = torch.load(self.args.mm_projector_model_path)
@@ -68,8 +73,8 @@ class SequentialMM_Model(Blip2Base):
 
         #image / text input, attention mask expand
         image_embeds = image_embeds.reshape(B*max_img, num_token, D) #[B*max_img, num_token, D]
-        if args.use_pretrained_qformer:
-            image_embeds = self.ln_vision(image_embeds)
+        # if not self.args.use_pretrained_qformer:
+        image_embeds = self.ln_vision(image_embeds)
         images_atts = images_atts.reshape(B*max_img, -1) #[B*max_img, num_token]
         text_input = text_input.repeat_interleave(max_img,dim=0) #[B*max_img, maxSeq] #NOTE 이거 [1,2,3]이면 [1,1,1, 2,2,2, 3,3,3] 이런식으로 반복해야하는데 맞게 들어가는지 확인해야함
         text_atts = text_atts.repeat_interleave(max_img,dim=0) #NOTE 이것도 확인해야함
@@ -100,7 +105,7 @@ class SequentialMM_Model(Blip2Base):
         query_output = query_output.reshape(B, max_img*self.num_query_token, -1) #[B, max_img*self.num_query_token, D]
         query_atts = query_atts.reshape(B, max_img*self.num_query_token) #[B, max_img*self.num_query_token]
 
-        qformer_output = self.mm_projector(self.qformer_to_mm_projector(query_output)) #[B, max_img*self.num_query_token, 4096]
+        qformer_output = self.mm_projector(self.bridge_former_to_projector(query_output)) #[B, max_img*self.num_query_token, 4096]
 
         #input_text_ids embedding
         text_input_ids = sample["input_ids"] #[B, maxS] -> [B*maxS] -> [B, maxS, 4096]

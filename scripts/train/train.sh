@@ -5,18 +5,20 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3
     --lora_enable True \
     --lora_r 4 \
     --lora_alpha 8 \
-    --mm_projector_lr 2e-5 \
+    --mm_projector_lr 1e-6 \
+    --qformer_lr 1e-6 \
     --deepspeed /SeqMMLearning/llava/zero3.json \
     --model_name_or_path /SeqMMLearning/checkpoints/llava-v1.5-7b \
     --mm_projector_model_path /SeqMMLearning/checkpoints/llava-v1.5-7b/mm_projector.bin \
     --pretrained_qformer_path /data/pretrained_models/qformer_pretrained \
     --pretrained_qformer_tokenizer_path /data/pretrained_models/qformer_pretrained/qformer_tokenizer \
     --use_pretrained_qformer True \
+    --freeze_pretrained True \
     --train_txt_path /data/dataset/split/train.txt \
     --val_txt_path /data/dataset/split/val.txt \
     --feature_path /data/dataset/features \
     --use_qformer True \
-    --query_num 16 \
+    --query_num 32 \
     --version sequential_reasoning \
     --data_path /data/dataset/split/data.json \
     --image_folder /data/data2/khahn/LLaVA/playground/data \
@@ -33,7 +35,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3
     --evaluation_strategy steps \
     --eval_steps 100 \
     --save_strategy steps \
-    --save_steps 1000 \
+    --save_steps 1500 \
     --save_total_limit 20 \
     --learning_rate 1e-5 \
     --weight_decay 0. \
@@ -46,3 +48,8 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3
     --dataloader_num_workers 8 \
     --lazy_preprocess True \
     --report_to wandb
+
+
+#qformer_lr은 use_pretrained_qformer을 쓰는 경우에만 넣기 None이 아니면 lr다르게 들어가게 해놨음.
+
+#pretrained qformer쓰려면 query 개수 32개여야함
