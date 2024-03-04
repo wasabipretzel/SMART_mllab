@@ -17,8 +17,10 @@ import os
 import warnings
 import shutil
 
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig, BitsAndBytesConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig, BitsAndBytesConfig, LlamaForCausalLM
 import torch
+import sys
+sys.path.append('/SeqMMLearning')
 from llava.model import *
 from llava.constants import DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 
@@ -164,3 +166,60 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
         context_len = 2048
 
     return tokenizer, model, image_processor, context_len
+
+
+class DotDict(dict):
+    def __getattr__(self, key):
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError(key)
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters())
+
+
+def load_pretrained_ckpt(model_path, model_base):
+    """
+        model_path : 새로 저장된 ckpt 폴더
+        model_base : 맨 처음 llava ckpt폴더 (토크나이저 load위해 필요)
+    """
+    lora_cfg_pretrained = AutoConfig.from_pretrained(model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
+    print('Loading LLaVA from base model...')
+    llm = LlamaForCausalLM.from_pretrained(
+            model_base,
+            config=lora_cfg_pretrained,
+            )
+
+    model_args = DotDict({
+        "use_pretrained_qformer" : True,
+        "pretrained_qformer_path" : "/data/pretrained_models/qformer_pretrained",
+        "pretrained_qformer_tokenizer_path" : "/data/pretrained_models/qformer_pretrained/qformer_tokenizer",
+        "pretrained_qformer_query_token_path" : "/data/pretrained_models/qformer_pretrained/query_tokens/query_tokens.pth"
+
+    })
+    from sequence_mm import SequentialMM_Model
+    model = SequentialMM_Model(llm=llm, query_num=32, args=model_args, device='cpu')
+    non_lora_trainables = torch.load(os.path.join(model_path, 'non_lora_trainables.bin'), map_location='cpu')
+
+    model.load_state_dict(non_lora_trainables, strict=False)
+
+    adapter = torch.load('/data/ckpt/adapter_model.bin', map_location='cpu')
+
+    adapter = {(k.replace("llm.base_model.model", "model.llm") if 'llm.base_model.' in k else k): v for k, v in adapter.items()}
+
+    print(f"before peft : {count_parameters(model.llm)}")
+
+    from peft import PeftModel
+    model.llm = PeftModel.from_pretrained(model.llm, model_path)
+
+    print(f"after peft : {count_parameters(model.llm)}")
+
+    return
+
+
+if __name__ == "__main__":
+    model_path = "/data/ckpt"
+    model_base = "/SeqMMLearning/checkpoints/llava-v1.5-7b"
+    load_pretrained_ckpt(model_path, model_base)

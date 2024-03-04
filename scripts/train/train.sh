@@ -28,13 +28,13 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3
     --image_aspect_ratio pad \
     --bf16 True \
     --output_dir /data/ckpt \
-    --num_train_epochs 100 \
+    --num_train_epochs 8 \
     --per_device_train_batch_size 3 \
     --per_device_eval_batch_size 3 \
     --gradient_accumulation_steps 1 \
     --evaluation_strategy steps \
-    --eval_steps 100 \
-    --save_strategy steps \
+    --eval_steps 50 \
+    --save_strategy no \
     --save_steps 1500 \
     --save_total_limit 20 \
     --learning_rate 1e-5 \
@@ -47,7 +47,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3
     --gradient_checkpointing True \
     --dataloader_num_workers 8 \
     --lazy_preprocess True \
-    --report_to wandb
+    --report_to none
 
 
 #qformer_lr은 use_pretrained_qformer을 쓰는 경우에만 넣기 None이 아니면 lr다르게 들어가게 해놨음.

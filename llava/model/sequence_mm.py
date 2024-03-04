@@ -1,6 +1,8 @@
 import torch
 import numpy as np
-from llava.model.lavis.blip2_origin import Blip2Base
+import sys
+sys.path.append("/SeqMMLearning")
+# from llava.model.lavis.blip2_origin import Blip2Base
 from llava.model.multimodal_projector.builder import build_vision_projector
 from torch import nn
 from transformers import AutoModelForCausalLM
@@ -114,28 +116,30 @@ class SequentialMM_Model(nn.Module):
         text_token_embeds = self.llm.get_input_embeddings()(text_input_ids) #[B*maxS, 4096]
         text_token_embeds = text_token_embeds.reshape(B, maxS, -1) #[B, maxS, 4096] 
 
-        #special_token embedding
-        img_st = sample["im_start_ids"]
-        img_end = sample["im_end_ids"]
+        # #special_token embedding
+        # img_st = sample["im_start_ids"]
+        # img_end = sample["im_end_ids"]
 
-        img_st_emb = self.llm.get_input_embeddings()(img_st) #[spl_token_len, 4096]
-        img_end_emb = self.llm.get_input_embeddings()(img_end) #[spl_token_len, 4096]
+        # img_st_emb = self.llm.get_input_embeddings()(img_st) #[spl_token_len, 4096]
+        # img_end_emb = self.llm.get_input_embeddings()(img_end) #[spl_token_len, 4096]
 
-        img_st_emb = img_st_emb.unsqueeze(0).expand(B, -1, -1) 
-        img_end_emb = img_end_emb.unsqueeze(0).expand(B, -1, -1)
+        # img_st_emb = img_st_emb.unsqueeze(0).expand(B, -1, -1) 
+        # img_end_emb = img_end_emb.unsqueeze(0).expand(B, -1, -1)
 
-        img_st_att = torch.ones(img_st_emb.size()[:-1], dtype=torch.long).to(img_st_emb.device)
-        img_end_att = torch.ones(img_end_emb.size()[:-1], dtype=torch.long).to(img_st_emb.device)
+        # img_st_att = torch.ones(img_st_emb.size()[:-1], dtype=torch.long).to(img_st_emb.device)
+        # img_end_att = torch.ones(img_end_emb.size()[:-1], dtype=torch.long).to(img_st_emb.device)
 
         #=====================vicuna input===============================
-        input_embeds = torch.cat([img_st_emb, qformer_output, img_end_emb, text_token_embeds], dim=1)
-        input_atts = torch.cat([img_st_att, query_atts, img_end_att, sample["input_ids_pad_mask"]], dim=1) 
+        # input_embeds = torch.cat([img_st_emb, qformer_output, img_end_emb, text_token_embeds], dim=1)
+        # input_atts = torch.cat([img_st_att, query_atts, img_end_att, sample["input_ids_pad_mask"]], dim=1) 
         #NOTE dimension check
+        input_embeds = torch.cat([qformer_output, text_token_embeds], dim=1)
+        input_atts = torch.cat([query_atts, sample["input_ids_pad_mask"]], dim=1) 
 
         #target
         # img_st_emb, qformer img_end_emb sequence length 만큼 -100을 추가로 채우면 되나?
         target = sample["target_ids"] #padding mask -100으로 해야함 
-        extra_target= torch.tensor([-100] * (img_st_emb.shape[1] + qformer_output.shape[1] + img_end_emb.shape[1])).unsqueeze(0).expand(B, -1).to(self.device) #[B, preceding length]
+        extra_target= torch.tensor([-100] * (qformer_output.shape[1])).unsqueeze(0).expand(B, -1).to(self.device) #[B, preceding length]
         # target = extra_target + target 
         target = torch.cat([extra_target, target], dim=1)
         #NOTE length check : target이랑 input_embeds랑 

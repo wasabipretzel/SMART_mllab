@@ -296,15 +296,81 @@ def _tokenize_fn(strings: Sequence[str],
 
 def _add_speaker_and_signal_assembly(header, source, get_conversation=True):
     """Add speaker and start/end signal on each round."""
+    breakpoint()
     BEGIN_SIGNAL = "### "
     END_SIGNAL = "\n"
     conversation = header
     conversation = "<im_st> <im_end> " + conversation
     source = " ### " + source
+    print(source)
     source = source.replace("Answer", " ### Answer")
     conversation = conversation + source 
-
+    breakpoint()
     return conversation
+
+def _add_speaker_and_signal_assembly(header, source, get_conversation=True):
+    """Add speaker and start/end signal on each round."""
+    breakpoint()
+    BEGIN_SIGNAL = "### "
+    END_SIGNAL = "\n"
+    conversation = header
+    conversation = "<im_st> <im_end> " + conversation
+    source = " ### " + source
+    print(source)
+    source = source.replace("Answer", " ### Answer")
+    conversation = conversation + source 
+    breakpoint()
+    return conversation
+
+# def preprocess_assembly(
+#     sources: Sequence[str],
+#     tokenizer: transformers.PreTrainedTokenizer,
+#     qf_tokenizer: transformers.PreTrainedTokenizer,
+#     has_image: bool = False
+# ) -> Dict:
+#     """
+#     Given a list of sources, each is a conversation list. This transform:
+#     1. Add signal '### ' at the beginning each sentence, with end signal '\n';
+#     2. Concatenate conversations together;
+#     3. Tokenize the concatenated conversation;
+#     4. Make a deepcopy as the target. Mask human words with IGNORE_INDEX.
+#     """
+#     #prompt : <im_st> <im_end> sys ### question ### answer
+#     breakpoint() #sources?
+#     header = f"{conversation_lib.default_conversation.system}\n\n" # general prompt 
+#     conversation = _add_speaker_and_signal_assembly(header, sources) # 1. Add signal
+#     conversations = [conversation]
+
+#     IMAGE_START = '<im_st>'
+#     IMAGE_END = '<im_end>'
+#     SEPERATOR = '###'
+    
+#     #question을 먼저 얻어야함
+#     question = conversation.split(SEPERATOR)[1].strip()
+#     text_source = conversation.split(IMAGE_START + ' ' + IMAGE_END)[-1] # ' sys ### question ### answer'
+#     #before_answer을 구하기 위함
+#     sys = text_source.split(SEPERATOR)[0].split(IMAGE_END)[-1] # ' sys'
+#     ques = text_source.split(SEPERATOR)[1] # ' question '
+#     before_answer = sys + SEPERATOR + ques + SEPERATOR+ ' ' # sys ### question ### 
+
+
+#     question_ids = qf_tokenizer(question).input_ids
+#     text_source_ids = tokenizer(text_source).input_ids
+#     before_answer_ids = tokenizer(before_answer).input_ids
+#     mask_len = len(before_answer_ids)
+#     #target 생성 : text_source 에서 before_answer length을 알아내서 text_source에서 특정 길이만큼 -100채우기
+#     target = tokenizer(text_source).input_ids
+#     target[:mask_len] = [-100] * mask_len
+    
+#     result = {
+#         "input_ids" : text_source_ids, #list
+#         "qformer_input_ids" : question_ids, #list
+#         "target" : target, #list
+#         "im_st" : tokenizer(IMAGE_START).input_ids,
+#         "im_end" : tokenizer(IMAGE_END).input_ids
+#     }
+
+#     return result
 
 
 def preprocess_assembly(
@@ -322,21 +388,16 @@ def preprocess_assembly(
     """
     #prompt : <im_st> <im_end> sys ### question ### answer
     header = f"{conversation_lib.default_conversation.system}\n\n" # general prompt 
-    conversation = _add_speaker_and_signal_assembly(header, sources) # 1. Add signal
-    conversations = [conversation]
+    # conversation = _add_speaker_and_signal_assembly(header, sources) # 1. Add signal
+    conversation = header + sources
+    # conversations = [conversation]
+    question_sep = "Question"
+    answer_sep = "Answer"
 
-    IMAGE_START = '<im_st>'
-    IMAGE_END = '<im_end>'
-    SEPERATOR = '###'
-    
-    #question을 먼저 얻어야함
-    question = conversation.split(SEPERATOR)[1].strip()
-    text_source = conversation.split(IMAGE_START + ' ' + IMAGE_END)[-1] # ' sys ### question ### answer'
-    #before_answer을 구하기 위함
-    sys = text_source.split(SEPERATOR)[0].split(IMAGE_END)[-1] # ' sys'
-    ques = text_source.split(SEPERATOR)[1] # ' question '
-    before_answer = sys + SEPERATOR + ques + SEPERATOR+ ' ' # sys ### question ### 
-
+    question = question_sep + conversation.split(question_sep)[1].split('Answer')[0] # 'question'
+    text_source = conversation #'sys question answer'
+    sys = text_source.split(question_sep)[0] #'sys'
+    before_answer = text_source.split(answer_sep)[0] # 'sys question'
 
     question_ids = qf_tokenizer(question).input_ids
     text_source_ids = tokenizer(text_source).input_ids
@@ -350,8 +411,6 @@ def preprocess_assembly(
         "input_ids" : text_source_ids, #list
         "qformer_input_ids" : question_ids, #list
         "target" : target, #list
-        "im_st" : tokenizer(IMAGE_START).input_ids,
-        "im_end" : tokenizer(IMAGE_END).input_ids
     }
 
     return result
@@ -558,8 +617,6 @@ class DataCollatorForSupervisedDataset(object):
             b_target.append(torch.tensor(each_batch["target"], dtype=torch.long))
         b_max_img = max(b_img_nums)
 
-        im_start_ids = torch.tensor(instances[0]["im_st"], dtype=torch.long)
-        im_end_ids = torch.tensor(instances[0]["im_end"], dtype=torch.long)
         _, num_token, D = instances[0]["feat"].shape 
         #pad text first
         b_p_input_ids = torch.nn.utils.rnn.pad_sequence(b_input_ids,
@@ -599,8 +656,6 @@ class DataCollatorForSupervisedDataset(object):
             "qformer_ids" : b_p_qformer_input_ids,
             "target_ids" : b_p_target_ids,
             "input_ids_pad_mask" : text_pad_mask,
-            "im_start_ids" : im_start_ids,
-            "im_end_ids" : im_end_ids,
 
             "images" : b_feat,
             "images_att" : b_feat_mask,
@@ -711,17 +766,10 @@ def train():
         model = SequentialMM_Model(llm=llm, query_num=model_args.query_num, args=model_args, device=training_args.device).to(training_args.device)
         print("model finished")
         model.load_mm_projector_state_dict()
-        print("a")
         qf_tokenizer = AutoTokenizer.from_pretrained(model_args.pretrained_qformer_tokenizer_path)
-        # qf_tokenizer = model.init_tokenizer()
-        print("b")
-        tokenizer.add_tokens(['###', '<im_st>', '<im_end>'], special_tokens=True)
-        model.llm.resize_token_embeddings(len(tokenizer))
         training_args.gradient_checkpointing=False
-        print("enabling")
         model.llm.gradient_checkpointing_enable()
         model.llm.enable_input_require_grads()
-        print("finished")
 
         #freeze qformer, mm_projector
         #model.qformer.requires_grad_(False)
@@ -753,7 +801,7 @@ def train():
         lora_config = LoraConfig(
             r=training_args.lora_r,
             lora_alpha=training_args.lora_alpha,
-            target_modules=find_all_linear_names(llm),
+            target_modules=find_all_linear_names(model.llm),
             lora_dropout=training_args.lora_dropout,
             bias=training_args.lora_bias,
             task_type="CAUSAL_LM",
@@ -766,24 +814,7 @@ def train():
         rank0_print("Adding LoRA adapters...")
         model.llm = get_peft_model(model.llm, lora_config) # LlavaLlamaForCausalLM -> PeftModelForCausalLM 모델 변경
     
-    '''
-    Prompt
-    '''
-    # if 'mpt' in model_args.model_name_or_path: # mpt : Pretrained decoder-only transformer
-    #     tokenizer = transformers.AutoTokenizer.from_pretrained(
-    #         model_args.model_name_or_path, # 
-    #         cache_dir=training_args.cache_dir,
-    #         model_max_length=training_args.model_max_length,
-    #         padding_side="right"
-    #     )
-    # else:
-    #     tokenizer = transformers.AutoTokenizer.from_pretrained(
-    #         model_args.model_name_or_path,
-    #         cache_dir=training_args.cache_dir,
-    #         model_max_length=training_args.model_max_length,
-    #         padding_side="right",
-    #         use_fast=False,
-    #     )
+
 
     if model_args.version == "v0":
         if tokenizer.pad_token is None:
@@ -876,8 +907,6 @@ def train():
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"total params : {count_parameters(model)}")
-
-
 
     ## DataLoader
     data_module = make_supervised_data_module(tokenizer=tokenizer,
