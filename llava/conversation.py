@@ -386,7 +386,7 @@ assembly_finetuning = Conversation(
 )
 
 sequential_reasoning = Conversation(
-    system="The precedings are sequential images which are instructional images to assist with assembling furniture. Assembly processes are divided into multiple steps, with one or several steps per image. Respond to the following question as you are seeing the images. ",
+    system="The proceedings are sequential images which are instructional images to assist with assembling furniture. Assembly processes are divided into multiple steps, with one or several steps per image. Respond to the following question as you are seeing the images. ",
     roles=("assistant"),
     version="response_generation",
     messages=(),
