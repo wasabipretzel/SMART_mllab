@@ -27,8 +27,8 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3
     --mm_vision_select_layer -2 \
     --image_aspect_ratio pad \
     --bf16 True \
-    --output_dir /data/ckpt \
-    --num_train_epochs 8 \
+    --output_dir /data/cache_ckpt \
+    --num_train_epochs 100 \
     --per_device_train_batch_size 3 \
     --per_device_eval_batch_size 3 \
     --gradient_accumulation_steps 1 \
@@ -39,7 +39,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3
     --save_total_limit 20 \
     --learning_rate 1e-5 \
     --weight_decay 0. \
-    --warmup_ratio 0.03 \
+    --warmup_ratio 0.02 \
     --lr_scheduler_type cosine \
     --logging_steps 1 \
     --tf32 True \
@@ -47,7 +47,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3
     --gradient_checkpointing True \
     --dataloader_num_workers 8 \
     --lazy_preprocess True \
-    --report_to none
+    --report_to wandb
 
 
 #qformer_lr은 use_pretrained_qformer을 쓰는 경우에만 넣기 None이 아니면 lr다르게 들어가게 해놨음.

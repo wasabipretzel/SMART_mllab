@@ -11,7 +11,6 @@ from transformers import PreTrainedModel
 from transformers import AutoTokenizer
 
 
-
 class SequentialMM_Model(nn.Module):
     def __init__(self, llm, query_num, args, device):
         super().__init__()
@@ -58,63 +57,12 @@ class SequentialMM_Model(nn.Module):
                 new_key = key[len("model.mm.projector."):]
                 new_state_dict[new_key] = value
         self.mm_projector.load_state_dict(new_state_dict)
-    
-    def process_input_llm(self,query_output, text_token_embeds, target, img_nums, input_ids_len):
-        """
-            query_output : [B, maximg*query, 4096]
-            text_token_embeds : [B, maxS, 4096]
-            target : [[S1], [S2] ..] list (inside tensor)
-        """
-        # 각 이미지당 token개수
-        img_nums = [img*self.num_query_token for img in img_nums]
-        total_token_len = [] # 각 batch별로 자르기 위함
-        for num_img, len_text in zip(img_nums, input_ids_len):
-            total_token_len.append(num_img+len_text)
-        max_token_len = max(total_token_len)
-        llm_input_rep = []
-        llm_target = []
-        B = query_output.shape[0]
-        dim = query_output.shape[-1]
-        for each_batch in range(B):
-            #query value
-            #text value
-            each_batch_query = query_output[each_batch][:img_nums[each_batch],:] #[each_img*query, 4096]
-            each_batch_input_ids = text_token_embeds[each_batch][:input_ids_len[each_batch],:] #[each_len, 4096]
-
-            each_batch_llm_input=torch.cat([each_batch_query, each_batch_input_ids], dim=0) #[each_img*query+each_len, 4096]
-            query_target = torch.tensor([-100]*each_batch_query.shape[0]).to(self.device)
-            each_batch_llm_target=torch.cat([query_target, target[each_batch]]) #[S1]
-
-            #add padding mask
-            cur_len = each_batch_llm_input.shape[0]
-            #[max_token_len - cur_len, 4096]
-            pad_rep_mask =  torch.zeros([max_token_len-cur_len, dim], dtype=torch.long).to(self.device)
-            each_batch_llm_input = torch.cat([each_batch_llm_input, pad_rep_mask], dim=0) #[each_img*query+each_len+padmask, 4096]
-            llm_input_rep.append(each_batch_llm_input)
-
-            #target padding mask
-            add_len = max_token_len - each_batch_llm_target.shape[0]
-            add_pad_mask = torch.full([add_len], -100).to(self.device)
-            each_batch_llm_target = torch.cat([each_batch_llm_target, add_pad_mask])
-            llm_target.append(each_batch_llm_target)
-
-        llm_input_rep = torch.stack(llm_input_rep, dim=0) #[B, total_token_len, 4096]
-
-        llm_input_pad_mask = llm_input_rep.ne(0).any(dim=2)
-
-        llm_target = torch.stack(llm_target, dim=0)
-
-        #target은 기존 앞에 
-        assert llm_input_rep.shape[1] == llm_input_pad_mask.shape[1] == llm_target.shape[1]
-
-        return llm_input_rep, llm_input_pad_mask, llm_target
 
     def forward(self, return_loss=True, **sample): #return_loss=True로 해야 huggingface trainer eval때 loss을 return해줌
 
         image_embeds = sample["images"].to(self.device) #[B, max_img, num_token, D]
         images_atts = sample["images_att"].to(self.device) #[B*max_img, num_token]
         img_nums = sample["image_num_in_batch"]
-        input_ids_len = sample["input_ids_len"]
 
         #text input
         text_input = sample["qformer_ids"] #input ids [B, max_Seq]
@@ -161,9 +109,6 @@ class SequentialMM_Model(nn.Module):
 
         qformer_output = self.mm_projector(self.bridge_former_to_projector(query_output)) #[B, max_img*self.num_query_token, 4096]
 
-
-
-
         #input_text_ids embedding
         text_input_ids = sample["input_ids"] #[B, maxS] -> [B*maxS] -> [B, maxS, 4096]
         B, maxS = text_input_ids.shape
@@ -171,29 +116,66 @@ class SequentialMM_Model(nn.Module):
         text_token_embeds = self.llm.get_input_embeddings()(text_input_ids) #[B*maxS, 4096]
         text_token_embeds = text_token_embeds.reshape(B, maxS, -1) #[B, maxS, 4096] 
 
-        target = sample["target_ids"]
-        llm_input_rep, llm_input_pad_mask, llm_target = self.process_input_llm(qformer_output, text_token_embeds, target, img_nums, input_ids_len)
+        # #special_token embedding
+        # img_st = sample["im_start_ids"]
+        # img_end = sample["im_end_ids"]
 
-        result = self.llm(
-            attention_mask=llm_input_pad_mask,
-            inputs_embeds = llm_input_rep,
-            labels=llm_target,
+        # img_st_emb = self.llm.get_input_embeddings()(img_st) #[spl_token_len, 4096]
+        # img_end_emb = self.llm.get_input_embeddings()(img_end) #[spl_token_len, 4096]
+
+        # img_st_emb = img_st_emb.unsqueeze(0).expand(B, -1, -1) 
+        # img_end_emb = img_end_emb.unsqueeze(0).expand(B, -1, -1)
+
+        # img_st_att = torch.ones(img_st_emb.size()[:-1], dtype=torch.long).to(img_st_emb.device)
+        # img_end_att = torch.ones(img_end_emb.size()[:-1], dtype=torch.long).to(img_st_emb.device)
+
+        #=====================vicuna input===============================
+        # input_embeds = torch.cat([img_st_emb, qformer_output, img_end_emb, text_token_embeds], dim=1)
+        # input_atts = torch.cat([img_st_att, query_atts, img_end_att, sample["input_ids_pad_mask"]], dim=1) 
+        #NOTE dimension check
+        input_embeds = torch.cat([qformer_output, text_token_embeds], dim=1)
+        input_atts = torch.cat([query_atts, sample["input_ids_pad_mask"]], dim=1) 
+
+        #target
+        # img_st_emb, qformer img_end_emb sequence length 만큼 -100을 추가로 채우면 되나?
+        target = sample["target_ids"] #padding mask -100으로 해야함 
+        extra_target= torch.tensor([-100] * (qformer_output.shape[1])).unsqueeze(0).expand(B, -1).to(self.device) #[B, preceding length]
+        # target = extra_target + target 
+        target = torch.cat([extra_target, target], dim=1)
+        #NOTE length check : target이랑 input_embeds랑 
+        result = self.llm( #110M
+            attention_mask=input_atts,
+            inputs_embeds=input_embeds,
+            labels=target,
             return_dict=True
         )
+
+        #img_st_emb을 batch 만큼 확장 + qformer_output + img_end_emb을 batch만큼 확장 + text_token_embeds
+        #확장한거 ne + qformer_atts + 확장한거 ne + text padding
+        #target도 만들어야함(얘는 -100)
+
+        # text_input_embeds = self.llm.embed_tokens(text_input_ids)
+        #NOTE 
+        # 1. bin file load -> ok
+        # 2. position_ids?
+        # 3. mm_project 통과
+        # 4. cat 후에 self.llm -> input_ids은 None이고, input_embeds에 다 넣고 label을 target으로 넣으면 됨
+        #NOTE -> mm_projector통과시켜야함 -> load 
+        #NOTE -> text embedding 값 받아야함 -> self.llm.embed_tokens(input_ids)하면됨 , img_st, img_end 도 embed_tokens해야되네
+        #img_st : [1] -> [B,  [img_st, query, img_end, ]
+        # result_tensor = torch.cat((specific_tensor.unsqueeze(0).expand(original_tensor.size(0), -1, -1), original_tensor, specific_tensor.unsqueeze(0).expand(original_tensor.size(0), -1, -1)), dim=1)
 
 
         return result #[B*max_img, query_token, 768]
 
     @torch.no_grad()
     def predict(self, **sample):
-
-        image_embeds = sample["images"].to(self.device) #[B, max_img, num_token, D]
+        image_embeds = sample["images"].to(self.device).float() #[B, max_img, num_token, D]
         images_atts = sample["images_att"].to(self.device) #[B*max_img, num_token]
         img_nums = sample["image_num_in_batch"]
-        input_ids_len = sample["input_ids_len"]
 
         #text input
-        text_input = sample["qformer_ids"] #input ids [B, max_Seq]
+        text_input = sample["qformer_ids"].to(self.device) #input ids [B, max_Seq]
         text_atts = torch.ne(text_input, 0)
         # text_atts = sample["text_att"] #[B, maxSeq]
         #image embedding
@@ -237,24 +219,45 @@ class SequentialMM_Model(nn.Module):
 
         qformer_output = self.mm_projector(self.bridge_former_to_projector(query_output)) #[B, max_img*self.num_query_token, 4096]
 
-
-
-
         #input_text_ids embedding
-        text_input_ids = sample["input_ids"] #[B, maxS] -> [B*maxS] -> [B, maxS, 4096]
+        text_input_ids = sample["input_ids"].to(self.device) #[B, maxS] -> [B*maxS] -> [B, maxS, 4096]
         B, maxS = text_input_ids.shape
         text_input_ids = text_input_ids.reshape(B*maxS)
         text_token_embeds = self.llm.get_input_embeddings()(text_input_ids) #[B*maxS, 4096]
         text_token_embeds = text_token_embeds.reshape(B, maxS, -1) #[B, maxS, 4096] 
 
-        target = sample["target_ids"]
-        llm_input_rep, llm_input_pad_mask, llm_target = self.process_input_llm(qformer_output, text_token_embeds, target, img_nums, input_ids_len)
+        # #special_token embedding
+        # img_st = sample["im_start_ids"]
+        # img_end = sample["im_end_ids"]
 
+        # img_st_emb = self.llm.get_input_embeddings()(img_st) #[spl_token_len, 4096]
+        # img_end_emb = self.llm.get_input_embeddings()(img_end) #[spl_token_len, 4096]
+
+        # img_st_emb = img_st_emb.unsqueeze(0).expand(B, -1, -1) 
+        # img_end_emb = img_end_emb.unsqueeze(0).expand(B, -1, -1)
+
+        # img_st_att = torch.ones(img_st_emb.size()[:-1], dtype=torch.long).to(img_st_emb.device)
+        # img_end_att = torch.ones(img_end_emb.size()[:-1], dtype=torch.long).to(img_st_emb.device)
+
+        #=====================vicuna input===============================
+        # input_embeds = torch.cat([img_st_emb, qformer_output, img_end_emb, text_token_embeds], dim=1)
+        # input_atts = torch.cat([img_st_att, query_atts, img_end_att, sample["input_ids_pad_mask"]], dim=1) 
+        #NOTE dimension check
+        input_embeds = torch.cat([qformer_output, text_token_embeds], dim=1)
+        input_atts = torch.cat([query_atts, sample["input_ids_pad_mask"].to(self.device)], dim=1) 
+
+        #target
+        # img_st_emb, qformer img_end_emb sequence length 만큼 -100을 추가로 채우면 되나?
+        #NOTE length check : target이랑 input_embeds랑 
 
         result = self.llm.generate( #110M
-            attention_mask=llm_input_pad_mask,
-            inputs_embeds=llm_input_rep,
+            attention_mask=input_atts,
+            inputs_embeds=input_embeds,
             return_dict=True
         )
 
         return result
+
+
+
+

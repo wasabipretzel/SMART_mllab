@@ -537,12 +537,14 @@ def assembly_collate_fn(batch):
     b_feat = []
     b_feat_mask = []
     b_img_nums = []
+    b_input_ids_len = []
     #get largest image num in batch
     for each_batch in batch:
         b_img_nums.append(each_batch["num_img"])
         b_input_ids.append(each_batch["input_ids"])
         b_qformer_input_ids.append(each_batch["qformer_input_ids"])
         b_target.append(each_batch["target"])
+        b_input_ids_len.append(len(each_batch["input_ids"]))
     b_max_img = max(b_img_nums)
     im_start_ids = batch[0]["im_st"]
     im_end_ids = batch[0]["im_end"]
@@ -609,12 +611,14 @@ class DataCollatorForSupervisedDataset(object):
         b_feat = []
         b_feat_mask = []
         b_img_nums = []
+        b_input_ids_len=[]
         #get largest image num in batch
         for each_batch in instances:
             b_img_nums.append(each_batch["num_img"])
             b_input_ids.append(torch.tensor(each_batch["input_ids"], dtype=torch.long))
             b_qformer_input_ids.append(torch.tensor(each_batch["qformer_input_ids"], dtype=torch.long))
             b_target.append(torch.tensor(each_batch["target"], dtype=torch.long))
+            b_input_ids_len.append(len(each_batch["input_ids"]))
         b_max_img = max(b_img_nums)
 
         _, num_token, D = instances[0]["feat"].shape 
@@ -625,9 +629,9 @@ class DataCollatorForSupervisedDataset(object):
         b_p_qformer_input_ids = torch.nn.utils.rnn.pad_sequence(b_qformer_input_ids,
                                                         batch_first=True,
                                                         padding_value = self.qf_tokenizer.pad_token_id) #NOTE 얘는 0이어야할텐데
-        b_p_target_ids = torch.nn.utils.rnn.pad_sequence(b_target,
-                                                        batch_first=True,
-                                                        padding_value = -100)    
+        # b_p_target_ids = torch.nn.utils.rnn.pad_sequence(b_target,
+        #                                                 batch_first=True,
+        #                                                 padding_value = -100)    
         #llm 넣기 전에 pad attention 을 concat해야 하므로 생성
         text_pad_mask = torch.ne(b_p_input_ids, self.tokenizer.pad_token_id)
 
@@ -654,13 +658,14 @@ class DataCollatorForSupervisedDataset(object):
         result = {
             "input_ids" : b_p_input_ids,
             "qformer_ids" : b_p_qformer_input_ids,
-            "target_ids" : b_p_target_ids,
+            "target_ids" : b_target,
             "input_ids_pad_mask" : text_pad_mask,
+            "input_ids_len" : b_input_ids_len,
 
             "images" : b_feat,
             "images_att" : b_feat_mask,
             "image_num_in_batch" : b_img_nums
-
+        
         }
 
         # images = [instance['images'] for instance in instances]
