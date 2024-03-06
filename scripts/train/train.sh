@@ -1,24 +1,20 @@
 export CUDA_VISIBLE_DEVICES=0,1,2,3
+export TOKENIZERS_PARALLELISM=false
 # export CUDA_VISIBLE_DEVICES=0
-
-/opt/conda/envs/videollava/bin/deepspeed /SeqMMLearning/llava/train/train_mem.py \
+# torchrun --nproc_per_node 1 
+    # --deepspeed /SeqMMLearning/llava/zero3.json \
+/opt/conda/envs/llava/bin/deepspeed /SeqMMLearning/llava/train/train_mem.py \
     --lora_enable True \
-    --lora_r 4 \
-    --lora_alpha 8 \
+    --lora_r 32 \
+    --lora_alpha 64 \
     --mm_projector_lr 1e-6 \
-    --qformer_lr 1e-6 \
-    --deepspeed /SeqMMLearning/llava/zero3.json \
     --model_name_or_path /SeqMMLearning/checkpoints/llava-v1.5-7b \
     --mm_projector_model_path /SeqMMLearning/checkpoints/llava-v1.5-7b/mm_projector.bin \
-    --pretrained_qformer_path /data/pretrained_models/qformer_pretrained \
-    --pretrained_qformer_tokenizer_path /data/pretrained_models/qformer_pretrained/qformer_tokenizer \
-    --use_pretrained_qformer True \
     --freeze_pretrained True \
     --train_txt_path /data/dataset/split/train.txt \
     --val_txt_path /data/dataset/split/val.txt \
     --feature_path /data/dataset/features \
-    --use_qformer True \
-    --query_num 32 \
+    --query_num 128 \
     --version sequential_reasoning \
     --data_path /data/dataset/split/data.json \
     --image_folder /data/data2/khahn/LLaVA/playground/data \
@@ -27,19 +23,19 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3
     --mm_vision_select_layer -2 \
     --image_aspect_ratio pad \
     --bf16 True \
-    --output_dir /data/cache_ckpt \
-    --num_train_epochs 100 \
+    --output_dir /data/dataset/cache_ckpt \
+    --num_train_epochs 10 \
     --per_device_train_batch_size 3 \
     --per_device_eval_batch_size 3 \
     --gradient_accumulation_steps 1 \
     --evaluation_strategy steps \
-    --eval_steps 50 \
+    --eval_steps 70 \
     --save_strategy no \
     --save_steps 1500 \
     --save_total_limit 20 \
-    --learning_rate 1e-5 \
+    --learning_rate 1e-4 \
     --weight_decay 0. \
-    --warmup_ratio 0.02 \
+    --warmup_ratio 0.1 \
     --lr_scheduler_type cosine \
     --logging_steps 1 \
     --tf32 True \

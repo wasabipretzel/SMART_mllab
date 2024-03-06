@@ -1,3 +1,12 @@
+"""
+ * Copyright (c) 2023, salesforce.com, inc.
+ * All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * For full license text, see LICENSE.txt file in the repo root or https://opensource.org/licenses/BSD-3-Clause
+ * By Junnan Li
+ * Based on huggingface code base
+ * https://github.com/huggingface/transformers/blob/v4.15.0/src/transformers/models/bert
+"""
 
 import math
 import os
@@ -83,13 +92,12 @@ class BertEmbeddings(nn.Module):
                 :, past_key_values_length : seq_length + past_key_values_length
             ].clone()
 
-        if input_ids is not None:
-            #Embedding(30523, 768) -> resize_token_embedding으로 바뀔 것 
-            embeddings = self.word_embeddings(input_ids) # crt: self.word_embeddings is NoneType (debugging by yjheo)
+        if input_ids is not None: # NOTE jw : 우리는 instruction feature이라서 input_ids가 None이 아니지만 self.word_embeddings가 None임 따라서 주석처리
+            # embeddings = self.word_embeddings(input_ids)
             if self.position_embedding_type == "absolute":
-                position_embeddings = self.position_embeddings(position_ids)
-                embeddings = embeddings + position_embeddings
-
+                # position_embeddings = self.position_embeddings(position_ids)
+                # embeddings = embeddings + position_embeddings
+                embeddings = input_ids #NOTE jw : 이어서 진행되기 위해 cat
             if query_embeds is not None:
                 embeddings = torch.cat((query_embeds, embeddings), dim=1)
         else:
@@ -265,6 +273,7 @@ class BertSelfAttention(nn.Module):
 
         outputs = outputs + (past_key_value,)
         return outputs
+
 
 class BertSelfOutput(nn.Module):
     def __init__(self, config):
@@ -473,6 +482,7 @@ class BertLayer(nn.Module):
         intermediate_output = self.intermediate_query(attention_output)
         layer_output = self.output_query(intermediate_output, attention_output)
         return layer_output
+
 
 class BertEncoder(nn.Module):
     def __init__(self, config):
@@ -807,6 +817,24 @@ class BertModel(BertPreTrainedModel):
         return_dict=None,
         is_decoder=False,
     ):
+        r"""
+        encoder_hidden_states  (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`):
+            Sequence of hidden-states at the output of the last layer of the encoder. Used in the cross-attention if
+            the model is configured as a decoder.
+        encoder_attention_mask (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`):
+            Mask to avoid performing attention on the padding token indices of the encoder input. This mask is used in
+            the cross-attention if the model is configured as a decoder. Mask values selected in ``[0, 1]``:
+            - 1 for tokens that are **not masked**,
+            - 0 for tokens that are **masked**.
+        past_key_values (:obj:`tuple(tuple(torch.FloatTensor))` of length :obj:`config.n_layers` with each tuple having 4 tensors of shape :obj:`(batch_size, num_heads, sequence_length - 1, embed_size_per_head)`):
+            Contains precomputed key and value hidden states of the attention blocks. Can be used to speed up decoding.
+            If :obj:`past_key_values` are used, the user can optionally input only the last :obj:`decoder_input_ids`
+            (those that don't have their past key value states given to this model) of shape :obj:`(batch_size, 1)`
+            instead of all :obj:`decoder_input_ids` of shape :obj:`(batch_size, sequence_length)`.
+        use_cache (:obj:`bool`, `optional`):
+            If set to :obj:`True`, :obj:`past_key_values` key value states are returned and can be used to speed up
+            decoding (see :obj:`past_key_values`).
+        """
         output_attentions = (
             output_attentions
             if output_attentions is not None
@@ -837,7 +865,7 @@ class BertModel(BertPreTrainedModel):
 
         query_length = query_embeds.shape[1] if query_embeds is not None else 0
 
-        embedding_output = self.embeddings( #BertEmbeddings
+        embedding_output = self.embeddings( #NOTE -> None으로 했는데 여기서 에러안나나?
             input_ids=input_ids,
             position_ids=position_ids,
             query_embeds=query_embeds,
@@ -936,6 +964,7 @@ class BertModel(BertPreTrainedModel):
             cross_attentions=encoder_outputs.cross_attentions,
         )
 
+
 class BertLMHeadModel(BertPreTrainedModel):
 
     _keys_to_ignore_on_load_unexpected = [r"pooler"]
@@ -974,6 +1003,38 @@ class BertLMHeadModel(BertPreTrainedModel):
         is_decoder=True,
         reduction="mean",
     ):
+        r"""
+        encoder_hidden_states  (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`):
+            Sequence of hidden-states at the output of the last layer of the encoder. Used in the cross-attention if
+            the model is configured as a decoder.
+        encoder_attention_mask (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`):
+            Mask to avoid performing attention on the padding token indices of the encoder input. This mask is used in
+            the cross-attention if the model is configured as a decoder. Mask values selected in ``[0, 1]``:
+            - 1 for tokens that are **not masked**,
+            - 0 for tokens that are **masked**.
+        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`):
+            Labels for computing the left-to-right language modeling loss (next word prediction). Indices should be in
+            ``[-100, 0, ..., config.vocab_size]`` (see ``input_ids`` docstring) Tokens with indices set to ``-100`` are
+            ignored (masked), the loss is only computed for the tokens with labels n ``[0, ..., config.vocab_size]``
+        past_key_values (:obj:`tuple(tuple(torch.FloatTensor))` of length :obj:`config.n_layers` with each tuple having 4 tensors of shape :obj:`(batch_size, num_heads, sequence_length - 1, embed_size_per_head)`):
+            Contains precomputed key and value hidden states of the attention blocks. Can be used to speed up decoding.
+            If :obj:`past_key_values` are used, the user can optionally input only the last :obj:`decoder_input_ids`
+            (those that don't have their past key value states given to this model) of shape :obj:`(batch_size, 1)`
+            instead of all :obj:`decoder_input_ids` of shape :obj:`(batch_size, sequence_length)`.
+        use_cache (:obj:`bool`, `optional`):
+            If set to :obj:`True`, :obj:`past_key_values` key value states are returned and can be used to speed up
+            decoding (see :obj:`past_key_values`).
+        Returns:
+        Example::
+            >>> from transformers import BertTokenizer, BertLMHeadModel, BertConfig
+            >>> import torch
+            >>> tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
+            >>> config = BertConfig.from_pretrained("bert-base-cased")
+            >>> model = BertLMHeadModel.from_pretrained('bert-base-cased', config=config)
+            >>> inputs = tokenizer("Hello, my dog is cute", return_tensors="pt")
+            >>> outputs = model(**inputs)
+            >>> prediction_logits = outputs.logits
+        """
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )

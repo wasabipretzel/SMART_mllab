@@ -43,7 +43,7 @@ import re
 import numpy as np
 
 #main model class
-from llava.model.sequence_mm import SequentialMM_Model, only_LLM
+from llava.model.sequence_mm import SequentialMM_Model
 # from llava.model.multimodal_projector.builder import build_vision_projector
 
 local_rank = None
@@ -127,16 +127,7 @@ class TrainingArguments(transformers.TrainingArguments):
 
 
 def maybe_zero_3(param, ignore_status=False, name=None):
-    from deepspeed import zero
-    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                logging.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}")
-        with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
-    else:
-        param = param.detach().cpu().clone()
+    param = param.detach().cpu().clone()
     return param
 
 
@@ -287,7 +278,6 @@ def _tokenize_fn(strings: Sequence[str],
     )
 
 
-
 def preprocess_assembly(
     sources: Sequence[str],
     has_image: bool = False
@@ -407,7 +397,7 @@ class LazySupervisedDataset_Assembly(Dataset):
         single_case = self.all_data[search_key] #{id : ~, content : ~}
         serial_number = single_case["id"]
         content = single_case["content"]
-
+ 
         # input_ids, qformer_input_ids, target, im_st, im_end
         data_dict = preprocess_assembly(
             content,    
@@ -420,7 +410,7 @@ class LazySupervisedDataset_Assembly(Dataset):
         feat = torch.tensor(np.load(single_feature_path)) #[num_img, 576]
         num_img = feat.shape[0]
         img_getitem = {
-            "feat" : feat, #tensor
+            "feat" : feat, #tensor [num_img, 576]
             "num_img" : num_img, #int
             
         }
@@ -436,58 +426,34 @@ class DataCollatorForSupervisedDataset(object):
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         #text
-        #image
-        b_feat = []
-        b_feat_mask = []
-        b_img_nums = []
         b_text_input = []
         b_text_output = []
+        #image
+        b_feat = []
+        b_img_nums = []
         #get largest image num in batch
+        #NOTE text input / output 에 대한 input_ids 및 att은 model forward에서 생성
         for each_batch in instances:
             b_img_nums.append(each_batch["num_img"])
             b_text_input.append(each_batch["text_input"])
             b_text_output.append(each_batch["text_output"])
+            b_feat.append(each_batch["feat"])
         b_max_img = max(b_img_nums)
 
-        _, num_token, D = instances[0]["feat"].shape 
-        #pad text first
-
-        #pad image feats
-        for each_batch in instances:
-            if each_batch["feat"].shape[0] == b_max_img:
-                b_feat.append(each_batch["feat"])
-                att_mask = torch.ones((b_max_img, num_token))
-                b_feat_mask.append(att_mask)
-            else:
-                #부족한 만큼 padding 
-                each_feat = each_batch["feat"] #[num_img, num_token, D]
-                att_mask = torch.ones((each_feat.shape[0], num_token)) #[num_img, num_token]
-                marginal = torch.zeros((b_max_img - each_feat.shape[0], num_token, D))
-                att_mask_zero = torch.zeros((b_max_img - each_feat.shape[0], num_token))
-                each_feat = torch.cat([each_feat, marginal], dim=0)
-                att_mask = torch.cat([att_mask, att_mask_zero], dim=0)
-                b_feat.append(each_feat)
-                b_feat_mask.append(att_mask)
-
-        b_feat = torch.stack(b_feat) #[B, max_img, num_token, D]
-        b_feat_mask = torch.stack(b_feat_mask, dim=0) #[B, max_img, num_token]이 되도록
 
         result = {
             "text_input" : b_text_input,
             "text_output" : b_text_output,
 
             "image_feat" : b_feat,
-            "images_att" : b_feat_mask,
             "image_num_in_batch" : b_img_nums
         
         }
 
-        # images = [instance['images'] for instance in instances]
-        # batch['images'] = images 
         return result
 
 
-def make_supervised_data_module( data_args) -> Dict:
+def make_supervised_data_module(data_args) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
     train_dataset = LazySupervisedDataset_Assembly(
                                 data_path=data_args.data_path,
@@ -522,8 +488,7 @@ def train():
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
     
     bnb_model_from_pretrained_args = {}
-
-
+    
     llm = transformers.LlamaForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
@@ -531,22 +496,17 @@ def train():
     )
 
     print(f"llm device : {llm.device}")
-
-    # from transformers import Blip2QFormerConfig, Blip2QFormerModel
-    # configuration_qformer = Blip2QFormerConfig()
-    # qformer = Blip2QFormerModel(configuration_qformer)
     
     print("initializing")
     #main model initialize
     model = SequentialMM_Model(llm=llm, query_num=model_args.query_num, args=model_args, device=training_args.device).to(training_args.device)
-    # print("model finished")
+    print("model finished")
     model.load_mm_projector_state_dict()
-    # model = only_LLM(llm=llm, query_num=model_args.query_num, args=model_args, device=training_args.device).to(training_args.device)
     training_args.gradient_checkpointing=False
-    model.llm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    model.llm.gradient_checkpointing_enable()
     model.llm.enable_input_require_grads()
-
     llm.config.use_cache = False
+
 
     ## PEFT(Parameter-Efficient Fine Tuning)   
     if training_args.lora_enable:
@@ -566,8 +526,6 @@ def train():
                 model.llm.to(torch.float16)
         rank0_print("Adding LoRA adapters...")
         model.llm = get_peft_model(model.llm, lora_config) # LlavaLlamaForCausalLM -> PeftModelForCausalLM 모델 변경
-    
-
 
     if model_args.version == "v0":
         if tokenizer.pad_token is None:
@@ -580,15 +538,14 @@ def train():
         tokenizer.pad_token = tokenizer.unk_token
     else:
         '''
-        Prompt 처리
+        Prompt 처리 #NOTE 여기 어떻게 들어옴?
         '''
         model.llm_tokenizer.pad_token = model.llm_tokenizer.unk_token
         if model_args.version in conversation_lib.conv_templates:
             conversation_lib.default_conversation = conversation_lib.conv_templates[model_args.version]
         else:
             conversation_lib.default_conversation = conversation_lib.conv_templates["vicuna_v1"]
-
-  
+    
 
     print(f"lora params : {model.llm.print_trainable_parameters()}")
     def count_parameters(model):
