@@ -1,5 +1,6 @@
 import os
 import sys
+sys.path.append("/SeqMMLearning")
 import copy
 import json
 import logging
@@ -20,7 +21,7 @@ from llava.train.llava_trainer import LLaVATrainer
 from llava import conversation as conversation_lib
 from llava.model import *
 from llava.mm_utils import tokenizer_image_token
-from llava.model.sequence_mm import SequentialMM_Model, only_LLM
+from llava.model.sequence_mm import SequentialMM_Model
 from llava.config.hf_config import * #argument class
 from llava.utils import rank0_print, maybe_zero_3, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, get_mm_adapter_state_maybe_zero_3, find_all_linear_names, safe_save_model_for_hf_trainer
 from llava.dataset.assembly_dataset import *
@@ -52,6 +53,7 @@ def train():
 
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
+    breakpoint()
 
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     if model_args.vision_tower == 'None':
@@ -60,19 +62,10 @@ def train():
     local_rank = training_args.local_rank
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
 
-    config_seqmm = SeqMMConfig(model_args.model_name_or_path, 
-        training_args.cache_dir, 
-        training_args.model_max_length,
-        model_args.query_num,
-        model_args.use_pretrained_qformer,
-        model_args.pretrained_qformer_path, 
-        model_args.pretrained_qformer_query_token_path,
-        model_args.mm_projector_model_path)
-
     
     print("initializing")
     #main model initialize
-    model = SequentialMM_Model(config_seqmm).to(training_args.device)
+    model = SequentialMM_Model(model_args).to(training_args.device)
     training_args.gradient_checkpointing=False
 
 
@@ -107,7 +100,7 @@ def train():
 
     model.config.use_cache = True
 
-    if training_args.lora_enable:
+    if model_args.lora_enable:
         state_dict = get_peft_state_maybe_zero_3(
             model.named_parameters(), training_args.lora_bias
         )

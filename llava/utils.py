@@ -3,8 +3,10 @@ import logging
 import logging.handlers
 import os
 import sys
-
 import requests
+
+import transformers
+import torch
 
 from llava.constants import LOGDIR
 

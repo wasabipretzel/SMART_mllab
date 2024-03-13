@@ -12,33 +12,8 @@ from llava.utils import find_all_linear_names
 from llava.model.multimodal_projector.builder import build_vision_projector
 from typing import Dict, Optional, Sequence, List
 
-class SeqMMConfig(LlamaConfig):
-    model_type='seqMM'
-
-    def __init__(self, 
-                    model_name_or_path='/SeqMMLearning/checkpoints/llava-v1.5-7b',
-                    cache_dir=None, 
-                    model_max_length=2048,
-                    query_num=32,
-                    use_pretrained_qformer=True, 
-                    pretrained_qformer_path='/data/pretrained_models/qformer_pretrained',
-                    pretrained_qformer_query_token_path='/data/pretrained_models/qformer_pretrained/query_tokens/query_tokens.pth',
-                    mm_projector_model_path='/SeqMMLearning/checkpoints/llava-v1.5-7b/mm_projector.bin',
-                    **kwargs
-                    ):
-        super().__init__(**kwargs)
-        self.model_name_or_path = model_name_or_path
-        self.cache_dir = cache_dir
-        self.model_max_length = model_max_length
-        self.query_num = query_num
-        self.use_pretrained_qformer = use_pretrained_qformer
-        self.pretrained_qformer_path = pretrained_qformer_path
-        self.pretrained_qformer_query_token_path = pretrained_qformer_query_token_path
-        self.mm_projector_model_path = mm_projector_model_path
-
 
 class SequentialMM_Model(PreTrainedModel):
-    config_class = SeqMMConfig
 
     def __init__(self, config):
         super().__init__(config)
@@ -54,47 +29,44 @@ class SequentialMM_Model(PreTrainedModel):
 
         #=========================LLM PEFT ==============================================
         lora_config = LoraConfig(
-            r=4,
-            lora_alpha=8,
+            r=self.config.lora_r,
+            lora_alpha=self.config.lora_alpha,
             target_modules=find_all_linear_names(self.llm),
-            lora_dropout=0.05,
-            bias='none',
+            lora_dropout=self.config.lora_dropout,
+            bias=self.config.lora_bias,
             task_type="CAUSAL_LM",
         )
         self.llm.to(torch.bfloat16)
         print("Adding LoRA adapters...")
         self.llm = get_peft_model(self.llm, lora_config) # LlavaLlamaForCausalLM -> PeftModelForCausalLM 모델 변경
         self.llm_tokenizer = AutoTokenizer.from_pretrained(
-            args.model_name_or_path
+            self.config.model_name_or_path
         )
         self.llm_tokenizer.padding_side="right"
         self.llm_tokenizer.truncation_side="right"
 
         #=================================mamba init =======================================================
         self.mamba_patch = Mamba(
-            d_model=768,
-            d_state=4,
-            d_conv=4,
-            expand=2,
+            d_model=self.config.mamba_patch_d_model,
+            d_state=self.config.mamba_patch_d_state,
+            d_conv=self.config.mamba_patch_d_conv,
+            expand=self.config.mamba_patch_expand,
         )
 
         self.mamba_img_seq = Mamba(
-            d_model=768,
-            d_state=4,
-            d_conv=2,
-            expand=2,
+            d_model=self.config.mamba_img_seq_d_model,
+            d_state=self.config.mamba_img_seq_d_state,
+            d_conv=self.config.mamba_img_seq_d_conv,
+            expand=self.config.mamba_img_seq_expand,
         )
         #====================================etc ====================================
         self.ln_vision = nn.Linear(1024, 768)
         print("init mamba finished")
-        self.args = args
         self.bridge_former_to_projector = nn.Linear(768, 1024)
         print("build vision projector")
         mm_projector = build_vision_projector(self.llm.config)
         self.mm_projector = mm_projector
-        self.device=device
-
-        load_mm_projector_state_dict()
+        self.load_mm_projector_state_dict()
     
     def concat_text_input_output(self, input_ids, input_atts, output_ids, output_atts):
         input_part_targets_len = []
@@ -121,7 +93,7 @@ class SequentialMM_Model(PreTrainedModel):
         return llm_tokens, input_part_targets_len
     
     def load_mm_projector_state_dict(self):
-        mm_projector_state_dict = torch.load(self.args.mm_projector_model_path)
+        mm_projector_state_dict = torch.load(self.config.mm_projector_model_path)
         new_state_dict={}
         for key, value in mm_projector_state_dict.items():
             if key.startswith("model.mm_projector."):

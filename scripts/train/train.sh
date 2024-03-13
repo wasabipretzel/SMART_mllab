@@ -1,27 +1,14 @@
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+# export CUDA_VISIBLE_DEVICES=0,1,2,3
 export TOKENIZERS_PARALLELISM=false
 # export CUDA_VISIBLE_DEVICES=0
 # torchrun --nproc_per_node 1 
     # --deepspeed /SeqMMLearning/llava/zero3.json \
-/opt/conda/envs/llava/bin/deepspeed /SeqMMLearning/llava/train/train_mem.py \
+/opt/conda/envs/llava/bin/deepspeed --include localhost:2 /SeqMMLearning/llava/train/train.py \
     --lora_enable True \
     --lora_r 32 \
     --lora_alpha 64 \
     --mm_projector_lr 1e-6 \
-    --model_name_or_path /SeqMMLearning/checkpoints/llava-v1.5-7b \
-    --mm_projector_model_path /SeqMMLearning/checkpoints/llava-v1.5-7b/mm_projector.bin \
     --freeze_pretrained True \
-    --train_txt_path /data/dataset/split/train.txt \
-    --val_txt_path /data/dataset/split/val.txt \
-    --feature_path /data/dataset/features \
-    --query_num 128 \
-    --version sequential_reasoning \
-    --data_path /data/dataset/split/data.json \
-    --image_folder /data/data2/khahn/LLaVA/playground/data \
-    --vision_tower None \
-    --mm_projector_type mlp2x_gelu \
-    --mm_vision_select_layer -2 \
-    --image_aspect_ratio pad \
     --bf16 True \
     --output_dir /data/dataset/cache_ckpt \
     --num_train_epochs 10 \
@@ -41,9 +28,9 @@ export TOKENIZERS_PARALLELISM=false
     --tf32 True \
     --model_max_length 2048 \
     --gradient_checkpointing True \
-    --dataloader_num_workers 8 \
+    --dataloader_num_workers 0 \
     --lazy_preprocess True \
-    --report_to wandb
+    --report_to none
 
 
 #qformer_lr은 use_pretrained_qformer을 쓰는 경우에만 넣기 None이 아니면 lr다르게 들어가게 해놨음.
