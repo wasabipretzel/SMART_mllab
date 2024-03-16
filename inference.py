@@ -1,6 +1,6 @@
 import os
 import sys
-sys.path.append("/SeqMMLearning")
+sys.path.append("/SeqMM")
 import copy
 import json
 import logging

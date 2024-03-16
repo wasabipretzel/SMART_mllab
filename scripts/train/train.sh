@@ -1,8 +1,8 @@
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 # export CUDA_VISIBLE_DEVICES=0
 
-# python /SeqMMLearning/train.py \
-torchrun --nproc_per_node 4 /SeqMMLearning/train.py \
+# python /SeqMM/train.py \
+torchrun --nproc_per_node 4 /SeqMM/train.py \
     --output_dir /data/MOMA/test_ckpt \
     --num_train_epochs 10 \
     --per_device_train_batch_size 3 \

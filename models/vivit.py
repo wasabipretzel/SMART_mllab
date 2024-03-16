@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import sys
-sys.path.append("/SeqMMLearning")
+sys.path.append("/SeqMM")
 
 from torch import nn
 from transformers import PreTrainedModel, AutoTokenizer, PretrainedConfig
