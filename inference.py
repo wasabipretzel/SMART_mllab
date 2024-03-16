@@ -70,10 +70,20 @@ def inference():
     if training_args.report_to != 'none':
         os.environ["WANDB_PROJECT"] = training_args.project_name
     
-    print("initializing")
-    #main model initialize
-    # model = SequentialMM_Model(model_args).to(training_args.device)
+    # Setup logging
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+    if training_args.should_log:
+        # The default of training_args.log_level is passive, so we set log level at info here to have that default.
+        transformers.utils.logging.set_verbosity_info()
 
+    log_level = training_args.get_process_log_level()
+    logger.setLevel(log_level)
+
+    logging.info("Loading Pretrained model")
     #load model 
     SeqMM_config = PretrainedConfig.from_pretrained(training_args.load_ckpt_path)
     model = SequentialMM_Model.from_pretrained(pretrained_model_name_or_path=training_args.load_ckpt_path,
@@ -83,7 +93,7 @@ def inference():
 
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"total params : {count_parameters(model)}")
+    logging.info(f"total params : {count_parameters(model)}")
 
     ## DataLoader
     data_module = make_test_module(data_args=data_args)
@@ -96,28 +106,9 @@ def inference():
 
 
     predictions, labels, metrics = trainer.predict(test_dataset=data_module["test_dataset"])
-    # trainer.save_model(training_args.output_dir)
-    # trainer.save_state()
+    logging.info(metrics)
 
-    print(metrics)
-
-    # model.config.use_cache = True
-
-    # if model_args.lora_enable:
-    #     state_dict = get_peft_state_maybe_zero_3(
-    #         model.named_parameters(), training_args.lora_bias
-    #     )
-    #     non_lora_state_dict = get_peft_state_non_lora_maybe_zero_3(
-    #         model.named_parameters()
-    #     )
-    #     if training_args.local_rank == 0 or training_args.local_rank == -1:
-    #         model.llm.config.save_pretrained(training_args.output_dir)
-    #         model.llm.save_pretrained(training_args.output_dir, state_dict=state_dict)
-    #         torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, 'non_lora_trainables.bin'))
-    # else:
-    #     safe_save_model_for_hf_trainer(trainer=trainer,
-    #                                    output_dir=training_args.output_dir)
-
+    #TODO need to add prediction / labels saving module (Optional)
 
 if __name__ == "__main__":
     inference()
