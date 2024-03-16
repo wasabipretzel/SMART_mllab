@@ -22,6 +22,7 @@ from utils.util import *
 
 
 local_rank = None
+logger = logging.getLogger(__name__)
 
 
 def compute_metrics(pred):
@@ -70,17 +71,37 @@ def train():
     local_rank = training_args.local_rank
     if training_args.report_to == 'wandb':
         os.environ["WANDB_PROJECT"] = training_args.project_name
+
+    # Setup logging
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+    if training_args.should_log:
+        # The default of training_args.log_level is passive, so we set log level at info here to have that default.
+        transformers.utils.logging.set_verbosity_info()
+
+    log_level = training_args.get_process_log_level()
+    logger.setLevel(log_level)
+
+    # Log on each process the small summary:
+    logger.warning(
+        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
+        + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
+    )
     
-    print("initializing")
+    logger.info("initializing")
     #main model initialize
+    #TODO : should PR for not to log config when loading pretraining models.. 
     model = SequentialMM_Model(model_args).to(training_args.device)
   
-
+    #TODO : move this to utils
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"total params : {count_parameters(model)}")
+    logger.info(f"total params : {count_parameters(model)}")
 
-    ## DataLoader
+    # craete dataset & collator
     data_module = make_supervised_data_module(data_args=data_args)
 
     trainer = Trainer(model=model,
@@ -93,6 +114,7 @@ def train():
     trainer.save_model(training_args.output_dir)
     trainer.save_state()
 
+    #NOTE should be added when applying lora -> added from llava github
     # model.config.use_cache = True
 
     # if model_args.lora_enable:

@@ -22,7 +22,7 @@ from utils.util import *
 
 
 local_rank = None
-
+logger = logging.getLogger(__name__)
 
 def compute_metrics(pred):
     """

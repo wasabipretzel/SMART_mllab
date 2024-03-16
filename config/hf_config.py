@@ -36,3 +36,4 @@ class TrainingArguments(TrainingArguments):
     label_names: List[str]=field(default_factory=partial(list, ["labels"]))
     load_ckpt_path: str=field(default=None)
     seed: int=42
+    should_log: bool=True
