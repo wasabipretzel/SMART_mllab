@@ -17,7 +17,7 @@ docker run -it --gpus '"device=0,1,2,3"' --ipc=host --name {your_container_name}
 
 2. Clone this repository and create conda environment
 ```bash
-git clone --branch {branch_name} git@github.com:wasabipretzel/SeqMM.git
+git clone git@github.com:wasabipretzel/SeqMM.git
 cd SeqMM
 conda env create -f seqmm.yaml conda activate seqmm
 ```
