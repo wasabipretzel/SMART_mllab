@@ -479,7 +479,7 @@ if __name__ == '__main__':
     # single_api_num()
     # mult_api_same_all_manuals()
     # merge_response_into_one()
-    split_train_val()
+    # split_train_val()
 
     # merge_error_handler_into_one()
 
