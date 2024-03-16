@@ -34,3 +34,5 @@ class TrainingArguments(TrainingArguments):
     logging_steps: int=1
     project_name: str=field(default="huggingface")
     label_names: List[str]=field(default_factory=partial(list, ["labels"]))
+    load_ckpt_path: str=field(default=None)
+    seed: int=42

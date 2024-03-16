@@ -13,7 +13,7 @@ from itertools import accumulate
 import torch
 import numpy as np
 import transformers
-from transformers import Trainer, set_seed
+from transformers import Trainer
 
 from dataset.dataset_vivit import *
 from config.hf_config import *
@@ -43,37 +43,42 @@ def compute_metrics(pred):
 
 
 
-def make_supervised_data_module( data_args) -> Dict:
+def make_test_module( data_args) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
-    train_dataset = MOMA(
-                        data_args=data_args, mode='train')
-    val_dataset =  MOMA(
-                        data_args=data_args, mode='val')
+    test_dataset =  MOMA(data_args=data_args, mode='test')
 
     data_collator = MOMA_collator()
     
     
-    return dict(train_dataset=train_dataset,
-                eval_dataset=val_dataset,
+    return dict(test_dataset=test_dataset,
                 data_collator=data_collator)
 
 
 
-def train():
+def inference():
+    """
+        test dataset initialize 이후, trainer init시에 train_dataset, eval_dataset 둘 다 None으로 해놓고
+        trainer.predict(test_dataset, ~~)
+    """
+
     global local_rank
 
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-
-    set_seed(training_args.seed)
     local_rank = training_args.local_rank
-    if training_args.report_to == 'wandb':
+    if training_args.report_to != 'none':
         os.environ["WANDB_PROJECT"] = training_args.project_name
     
     print("initializing")
     #main model initialize
-    model = SequentialMM_Model(model_args).to(training_args.device)
+    # model = SequentialMM_Model(model_args).to(training_args.device)
+
+    #load model 
+    SeqMM_config = PretrainedConfig.from_pretrained(training_args.load_ckpt_path)
+    model = SequentialMM_Model.from_pretrained(pretrained_model_name_or_path=training_args.load_ckpt_path,
+                                                config= SeqMM_config
+                                                ).to(training_args.device)
   
 
     def count_parameters(model):
@@ -81,17 +86,20 @@ def train():
     print(f"total params : {count_parameters(model)}")
 
     ## DataLoader
-    data_module = make_supervised_data_module(data_args=data_args)
+    data_module = make_test_module(data_args=data_args)
 
     trainer = Trainer(model=model,
                     args=training_args,
                     compute_metrics=compute_metrics,
-                    **data_module)
+                    data_collator = data_module["data_collator"]
+                    )
 
 
-    trainer.train()
-    trainer.save_model(training_args.output_dir)
-    trainer.save_state()
+    predictions, labels, metrics = trainer.predict(test_dataset=data_module["test_dataset"])
+    # trainer.save_model(training_args.output_dir)
+    # trainer.save_state()
+
+    print(metrics)
 
     # model.config.use_cache = True
 
@@ -112,4 +120,4 @@ def train():
 
 
 if __name__ == "__main__":
-    train()
+    inference()
