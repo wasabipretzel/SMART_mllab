@@ -1,21 +1,20 @@
-import torch
-import numpy as np
 import sys
-sys.path.append("/SeqMM")
+# sys.path.append("/SeqMM")
 
+import numpy as np
+import torch
 from torch import nn
 from transformers import PreTrainedModel, AutoTokenizer, PretrainedConfig
 from typing import Dict, Optional, Sequence, List
-from transformers import VivitModel
 
+from models.instructblip.modeling_instructblip import InstructBlipForConditionalGeneration
 
-class SequentialMM_Model(PreTrainedModel):
+class BaseModel(PreTrainedModel):
 
     def __init__(self, config):
         super().__init__(config)
         self.config = config
-        self.vid_enc = VivitModel.from_pretrained("google/vivit-b-16x2-kinetics400")
-        self.cls = nn.Linear(768, 91)
+        self.VLM = InstructBlipForConditionalGeneration.from_pretrained("Salesforce/instructblip-vicuna-7b")
 
         self.criterion = nn.MultiLabelSoftMarginLoss()
 

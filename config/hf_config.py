@@ -11,16 +11,16 @@ from functools import partial
 
 @dataclass
 class ModelArguments(PretrainedConfig):
+    model_type:str="instructblip"
     vivit_hidden_dim: int =768
     moma_label: int=91
     
 
 @dataclass
 class DataArguments:
-    split_path: str ="/data/MOMA/preprocessed/splits/split_exclude_over900_and_instover250_nosubact.json"
-    raw_vid_path: str="/data/MOMA/raw"
-    target_path : str="/data/MOMA/frozen_meta.json"
-    sample_frames: int=32
+    split_type: str="PS"
+    split_path: str="/data/split"
+    data_path: str="/data/SMART101-release-v1/SMART101-Data"
     num_class: int=91
 
 

@@ -15,10 +15,11 @@ import numpy as np
 import transformers
 from transformers import Trainer, set_seed
 
-from dataset.dataset_vivit import *
+from dataset.smart import *
 from config.hf_config import *
-from models.vivit import *
-from utils.util import *
+from models.basemodel import *
+from models.build_model import get_model
+from utils.util import count_parameters
 
 
 local_rank = None
@@ -44,14 +45,14 @@ def compute_metrics(pred):
 
 
 
-def make_supervised_data_module( data_args) -> Dict:
+def make_supervised_data_module(data_args, processor=None) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
-    train_dataset = MOMA(
-                        data_args=data_args, mode='train')
-    val_dataset =  MOMA(
-                        data_args=data_args, mode='val')
+    train_dataset = SMART(
+                        data_args=data_args, mode='train', processor=processor)
+    val_dataset =  SMART(
+                        data_args=data_args, mode='val', processor=processor)
 
-    data_collator = MOMA_collator()
+    data_collator = SMART_collator()
     
     
     return dict(train_dataset=train_dataset,
@@ -92,14 +93,11 @@ def train():
     )
     
     logger.info("initializing")
-    #main model initialize
-    #TODO : should PR for not to log config when loading pretraining models.. 
-    model = SequentialMM_Model(model_args).to(training_args.device)
-  
-    #TODO : move this to utils
-    def count_parameters(model):
-        return sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logger.info(f"total params : {count_parameters(model)}")
+
+    #using get_model 
+    model, processor = get_model(model_args, training_args.device)
+
+    logger.info(f"Trainable model params : {count_parameters(model)}")
 
     # craete dataset & collator
     data_module = make_supervised_data_module(data_args=data_args)
