@@ -1,6 +1,5 @@
 import os
 import sys
-sys.path.append("/SeqMM")
 import copy
 import json
 import logging
@@ -13,46 +12,78 @@ from itertools import accumulate
 import torch
 import numpy as np
 import transformers
-from transformers import Trainer
+from transformers import Trainer, Seq2SeqTrainer
+from datasets import load_metric
 
-from dataset.dataset_vivit import *
+from dataset.smart import *
 from config.hf_config import *
-from models.vivit import *
-from utils.util import *
+from models.basemodel import *
+from models.build_model import get_model
+from utils.util import count_parameters
 
 
 local_rank = None
 logger = logging.getLogger(__name__)
 
-def compute_metrics(pred):
+
+@dataclass
+class ComputeMetric:
+    tokenizer: transformers.PreTrainedTokenizer
     """
+    EvalPrediction(predictions=preds, label_ids=label_ids, inputs=inputs_ids)
         get all logits, labels after all eval_step
-        
+       pred.predictions (얘가 맞는듯) (300, 182)
+       pred.label_ids  (얜 죄다 -100) (300, 124)
+        predictions (`np.ndarray`): Predictions of the model.
+        label_ids (`np.ndarray`): Targets to be matched.
+       tokenizer을 넣어줘야하는듯. 
     """
-    class_logit = pred.predictions[0] #[total_samples, class] logit
-    labels = pred.label_ids #[total_samples, class] multi hot label
-    
-    pred_score = torch.sigmoid(torch.tensor(class_logit))
-
-    aps = compute_multiple_aps(labels, pred_score)
-
-    metrics = {
-        "mAP" : aps[aps != -1].mean()
+    metric = load_metric("accuracy")
+    candidates = {
+        "A" : 0,
+        "B" : 1,
+        "C" : 2,
+        "D" : 3,
+        "E" : 4,
     }
-    return metrics
+    def compute_metrics(self, pred):
+
+        pred.label_ids[pred.label_ids == -100] = self.tokenizer.pad_token_id #fill -100 index with pad_token_id (preventing index/overflow error)
+        gt_answer_list = self.tokenizer.batch_decode(pred.label_ids, skip_special_tokens=True) #get rid of pad tokens
+
+        #prediction 
+        pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
+        pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
+
+        gt_filtered = []
+        pred_filtered = []
+        for gt, pred_ans in zip(gt_answer_list, pred_answer_list):
+            gt_flag=False
+            pred_ans_flag=False
+            for each_option in candidates.keys():
+                if each_option in gt and gt_flag == False:
+                    gt_filtered.append(self.candidate[each_option])
+                    gt_flag=True
+                if each_option in pred_ans and pred_ans_flag == False:
+                    pred_filtered.append(self.candidate[each_option])
+                    pred_ans_flag=True 
+        
+        metrics = self.metric.compute(references=gt_filtered, predictions=pred_filtered)
+
+        return metrics
 
 
-
-def make_test_module( data_args) -> Dict:
+def make_test_module(data_args, processor=None) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
-    test_dataset =  MOMA(data_args=data_args, mode='test')
+    # train_dataset = SMART(data_args=data_args, mode='train')
+    test_dataset = SMART(data_args=data_args, mode='test')
 
-    data_collator = MOMA_collator()
+    data_collator = SMART_collator(processor=processor)
     
     
-    return dict(test_dataset=test_dataset,
+    return dict(
+                test_dataset=test_dataset,
                 data_collator=data_collator)
-
 
 
 def inference():
@@ -85,22 +116,15 @@ def inference():
 
     logging.info("Loading Pretrained model")
     #load model 
-    SeqMM_config = PretrainedConfig.from_pretrained(training_args.load_ckpt_path)
-    model = SequentialMM_Model.from_pretrained(pretrained_model_name_or_path=training_args.load_ckpt_path,
-                                                config= SeqMM_config
-                                                ).to(training_args.device)
-  
-
-    def count_parameters(model):
-        return sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logging.info(f"total params : {count_parameters(model)}")
+    model, processor = get_model(model_args, training_args)
 
     ## DataLoader
-    data_module = make_test_module(data_args=data_args)
+    data_module = make_test_module(data_args=data_args, processor=processor)
+    metric = ComputeMetric(processor.tokenizer)
 
-    trainer = Trainer(model=model,
+    trainer = Seq2SeqTrainer(model=model,
                     args=training_args,
-                    compute_metrics=compute_metrics,
+                    compute_metrics=metric.compute_metrics,
                     data_collator = data_module["data_collator"]
                     )
 

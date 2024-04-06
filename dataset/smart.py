@@ -1,14 +1,17 @@
 import os
+import math
+import pickle as pkl
+
+from PIL import Image
 import torch
 from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
-import math
-import pickle as pkl
 import numpy as np
 from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, List
 import transformers
 
+from utils.util import concat_text_input_output
 
 class SMART(Dataset):
     """
@@ -21,9 +24,10 @@ class SMART(Dataset):
 
         self.data_args = data_args
         self.mode = mode
-        if processor != None:
-            self.processor = processor
-        self.qa_info = self.get_qainfo() 
+        # if processor != None:
+        #     self.processor = processor
+        self.qa_info = self.get_qainfo()
+        self.generate_option_key()
         """
             {'id': '1', 
             'Question': 'How many ways are there for the feline to reach the bird if the feline can only move horizontally or vertically towards the bird in the grid?', 
@@ -32,9 +36,24 @@ class SMART(Dataset):
             'Answer': 'D', 'Note': 'C(5|2)', 
             'puzzle_id': '19', 'AnswerValue': 10}
         """
-        breakpoint()
-        
 
+    def generate_option_key(self):
+        """_summary_
+            given self.qa_info, create option key and value for input text prompt
+            {'A': '6', 'B': '13', 'C': '12', 'D': '10', 'E': '9'} -> {options : "A : 6, B : 13, C : 12, D : 10, E : 9"}
+        """
+        option_candidates = ["A","B","C","D","E"]
+        for qa_pair in self.qa_info:
+            option_values = ""
+            for each_option in option_candidates:
+                if each_option != "E":
+                    update_msg = f"{each_option} : {qa_pair[each_option]}, "
+                else:
+                    update_msg = f"{each_option} : {qa_pair[each_option]}."
+                option_values += update_msg
+            qa_pair["options"] = option_values
+        return
+        
     def get_qainfo(self) -> List[dict]:
         """
             load all QA pair & image metadata
@@ -59,26 +78,19 @@ class SMART(Dataset):
 
         return image
 
-
-    def onehot_multilabel(self, idxs, classes):
-        one_hot = np.zeros(classes)
-        one_hot[idxs] = 1
-        return one_hot
-
-    def get_target(self, vid):
-        # Answers can be modified with multi-hop reasoning process
-
-        return
-
-    def process_text(self, qa_pair):
+    def get_input_text(self, qa_pair):
         #process input text -> this function can be developed for instruction tuning etc
-        question = qa_pair["Question"]
-        answer = qa_pair["Answer"]
-        
         prompt = "Please read the following question, select the correct answer from one of the options.\n"
-        question = "Question : " + question
+        question = "Question : " + qa_pair["Question"] + '\n' + 'Options : ' + qa_pair["options"] + "\n" + "Answer : "
 
-        return
+        return prompt + question
+
+    def get_output_text(self, qa_pair):
+        # Answers can be modified with multi-hop reasoning process
+        # answer_prefix = "Answer : "
+        answer = qa_pair["Answer"]
+
+        return answer
 
     def __len__(self):
         return len(self.qa_info)
@@ -86,42 +98,88 @@ class SMART(Dataset):
     def __getitem__(self, idx):
         single_qa_pair = self.qa_info[idx]
         image = self.load_image(single_qa_pair)
-        inputs = self.process_text(single_qa_pair)
-        target = self.get_target(single_qa_pair) #nparray (91,)
+        text_input = self.get_input_text(single_qa_pair)
+        text_output = self.get_output_text(single_qa_pair) 
+
         data = {
-            'vid' : vid_name,
-            'vid_input' : vid_input,
-            'target': torch.tensor(target) #[91] tensor
+            'pixel_values' : image,
+            # llm input
+            'text_input' : text_input, #prompt + "Question :" + question
+            'text_output': text_output,
+
+            # for qformer instruction input
+            'question' : single_qa_pair["Question"],
+
+            # for different collator action
+            'mode' : self.mode, 
         }
 
         return data
 
-
-
-
 @dataclass
 class SMART_collator(object):
     """Collate examples for supervised fine-tuning."""
+    processor:transformers.ProcessorMixin
+
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        b_vid_names = []
-        b_vid_inputs = []
-        b_target = []
+        b_pixel_values = []
+        b_text_input = []
+        b_text_output = []
+        b_qformer_text_input = []
+        mode = instances[0]["mode"]
 
         for each_batch in instances:
-            b_vid_names.append(each_batch["vid"])
-            b_vid_inputs.append(each_batch["vid_input"].squeeze(0))
-            b_target.append(each_batch["target"])
-
-        #target은 stack
-        b_vid_inputs = torch.stack(b_vid_inputs) #[B, T, C, H, W]
-        b_target = torch.stack(b_target) #[B, class]
-
-        result = {
-            "vid_names" : b_vid_names,
-            "vid_input" : b_vid_inputs,
-            "labels" : b_target,
-        }
+            #qformer input
+            b_pixel_values.append(each_batch["pixel_values"]) 
+            b_qformer_text_input.append(each_batch["question"])
+            #llm I/O
+            b_text_input.append(each_batch["text_input"])
+            b_text_output.append(each_batch["text_output"])
 
 
-        return result
+        #qformer input
+        image_input = self.processor(images=b_pixel_values, return_tensors='pt')
+        qformer_text_input = self.processor(text=b_qformer_text_input, padding=True, truncation=True, return_tensors='pt')
+        #llm I/O 
+        #NOTE 매 output 문장 끝에 eos token 이 붙어있는지 확인할것 
+        text_input = self.processor(text=b_text_input, padding=True, truncation=True, return_tensors='pt')
+        text_output = self.processor(text=b_text_output, padding=True, truncation=True, return_tensors='pt')
+
+        llm_inputs, input_part_targets_len = concat_text_input_output(
+            text_input.input_ids,
+            text_input.attention_mask,
+            text_output.input_ids,
+            text_output.attention_mask,
+        )
+
+        #target
+        targets = llm_inputs["input_ids"].masked_fill(
+            llm_inputs["input_ids"] == self.processor.tokenizer.pad_token_id, -100
+        )
+        for batch_idx, input_length in enumerate(input_part_targets_len):
+            targets[batch_idx][:input_length] = -100
+        #NOTE -> 위의 target 은 text input에 해당하는 것. query token에 대한 target과 atts도 붙혖줘야함  -> 모델 forward내부에서 알아서 해줌
+        
+        if mode == "train":
+            inputs = {
+                "pixel_values" : image_input.pixel_values,
+                "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
+                "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
+                #NOTE -> text_input processor거쳐서 무슨 key로 해야 input_ids가 나옴?
+                "input_ids" : llm_inputs["input_ids"],
+                "attention_mask" : llm_inputs["attention_mask"],
+                "labels" : targets,
+            }
+        else:
+            inputs = {
+                "pixel_values" : image_input.pixel_values,
+                "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
+                "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
+                # for generation, need different input_ids and att_mask
+                "input_ids" : text_input.input_ids,
+                "attention_mask" : text_input.attention_mask,
+                "labels" : targets,
+            } 
+        
+        return inputs
 

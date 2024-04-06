@@ -1370,7 +1370,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         The unusual aspect of this image is that a man is ironing clothes on the back of a yellow SUV, which is parked in the middle of a busy city street. This is an unconventional approach to ironing clothes, as it requires the man to balance himself and his ironing equipment on top of the vehicle while navigating through traffic. Additionally, the presence of taxis and other vehicles in the scene further emphasizes the unusual nature of this situation.
         ```"""
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
+        
         # step 1: forward the images through the vision encoder,
         # to get image embeddings of shape (batch_size, seq_len, hidden_size)
         vision_outputs = self.vision_model(
@@ -1540,7 +1540,6 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         if not self.language_model.config.is_encoder_decoder:
             generate_kwargs["max_length"] = generate_kwargs.get("max_length", 20) + language_model_inputs.shape[1] - 1
             generate_kwargs["min_length"] = generate_kwargs.get("min_length", 0) + language_model_inputs.shape[1]
-
         outputs = self.language_model.generate(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
