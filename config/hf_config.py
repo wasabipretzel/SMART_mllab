@@ -17,7 +17,10 @@ class ModelArguments(PretrainedConfig):
     freeze_image_encoder: bool=True
     use_bf16: bool=True
     # keys_to_ignore_at_inference: List[str]=field(default_factory=partial(list, ["qformer_outputs", 'vision_outputs'])) -> model forward return 의 key값을 바꿔주면 됨
-    
+    use_lora: bool=True
+    lora_r: int=16
+    lora_alpha: int=32
+
 
 @dataclass
 class DataArguments:

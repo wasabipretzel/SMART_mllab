@@ -1,6 +1,6 @@
 import sys
-# sys.path.append("/SeqMM")
 
+import logging
 import numpy as np
 import torch
 from torch import nn
@@ -8,6 +8,10 @@ from transformers import PreTrainedModel, AutoTokenizer, PretrainedConfig
 from typing import Dict, Optional, Sequence, List
 
 from models.instructblip.modeling_instructblip import InstructBlipForConditionalGeneration
+from peft import LoraConfig, get_peft_model
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 class BaseModel(PreTrainedModel):
 
@@ -23,6 +27,17 @@ class BaseModel(PreTrainedModel):
                 param.requires_grad=False  
         if config.use_bf16:
             self.VLM.to(torch.bfloat16)
+        if config.use_lora:
+            lora_config = LoraConfig(
+                r=config.lora_r,
+                lora_alpha=config.lora_alpha,
+                target_modules=["q_proj","v_proj"],
+                lora_dropout=0.05,
+                bias='none',
+                task_type="CAUSAL_LM",
+            )
+            logger.info("Adding LoRA adapters...")
+            self.VLM.language_model = get_peft_model(self.VLM.language_model, lora_config) # LlavaLlamaForCausalLM -> PeftModelForCausalLM 모델 변경
 
     def forward(self, return_loss=True, **sample):
         result = self.VLM(
