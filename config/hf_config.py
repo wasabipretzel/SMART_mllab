@@ -38,7 +38,7 @@ class TrainingArguments(Seq2SeqTrainingArguments):
     optim: str = field(default="adamw_torch")
     remove_unused_columns: bool = field(default=False)
     logging_steps: int=1
-    project_name: str=field(default="huggingface")
+    project_name: str=field(default="smart_challenge")
     label_names: List[str]=field(default_factory=partial(list, ["labels"]))
     load_ckpt_path: str=field(default=None)
     seed: int=42
