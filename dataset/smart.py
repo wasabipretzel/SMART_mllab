@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, List
 import transformers
 
-from utils.util import concat_text_input_output
+from utils.util import concat_text_input_output, generation_concat_text_input_output
 
 class SMART(Dataset):
     """
@@ -100,11 +100,10 @@ class SMART(Dataset):
         image = self.load_image(single_qa_pair)
         text_input = self.get_input_text(single_qa_pair)
         text_output = self.get_output_text(single_qa_pair) 
-
         data = {
             'pixel_values' : image,
             # llm input
-            'text_input' : text_input, #prompt + "Question :" + question
+            'text_input' : text_input, #prompt + "Question :" + question + "Answer : "
             'text_output': text_output,
 
             # for qformer instruction input
@@ -145,22 +144,21 @@ class SMART_collator(object):
         text_input = self.processor(text=b_text_input, padding=True, truncation=True, return_tensors='pt')
         text_output = self.processor(text=b_text_output, padding=True, truncation=True, return_tensors='pt')
 
-        llm_inputs, input_part_targets_len = concat_text_input_output(
-            text_input.input_ids,
-            text_input.attention_mask,
-            text_output.input_ids,
-            text_output.attention_mask,
-        )
 
-        #target
-        targets = llm_inputs["input_ids"].masked_fill(
-            llm_inputs["input_ids"] == self.processor.tokenizer.pad_token_id, -100
-        )
-        for batch_idx, input_length in enumerate(input_part_targets_len):
-            targets[batch_idx][:input_length] = -100
-        #NOTE -> 위의 target 은 text input에 해당하는 것. query token에 대한 target과 atts도 붙혖줘야함  -> 모델 forward내부에서 알아서 해줌
-        
         if mode == "train":
+            llm_inputs, input_part_targets_len = concat_text_input_output(
+                text_input.input_ids,
+                text_input.attention_mask,
+                text_output.input_ids,
+                text_output.attention_mask,
+            )
+            #target
+            targets = llm_inputs["input_ids"].masked_fill(
+                llm_inputs["input_ids"] == self.processor.tokenizer.pad_token_id, -100
+            )
+            for batch_idx, input_length in enumerate(input_part_targets_len):
+                targets[batch_idx][:input_length] = -100
+
             inputs = {
                 "pixel_values" : image_input.pixel_values,
                 "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
@@ -171,14 +169,21 @@ class SMART_collator(object):
                 "labels" : targets,
             }
         else:
+            llm_inputs, answer_labels = generation_concat_text_input_output(
+                text_input.input_ids,
+                text_input.attention_mask,
+                text_output.input_ids,
+                text_output.attention_mask,
+            )
+
             inputs = {
                 "pixel_values" : image_input.pixel_values,
                 "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
                 "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
                 # for generation, need different input_ids and att_mask
-                "input_ids" : text_input.input_ids,
-                "attention_mask" : text_input.attention_mask,
-                "labels" : targets,
+                "input_ids" : llm_inputs["input_ids"],
+                "attention_mask" : llm_inputs["attention_mask"],
+                "labels" : answer_labels,
             } 
         
         return inputs

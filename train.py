@@ -54,7 +54,6 @@ class ComputeMetric:
         #prediction 
         pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
         pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
-
         gt_filtered = []
         pred_filtered = []
         for gt, pred_ans in zip(gt_answer_list, pred_answer_list):
@@ -102,7 +101,7 @@ def train():
 
     set_seed(training_args.seed)
     local_rank = training_args.local_rank
-    if training_args.report_to == 'wandb':
+    if training_args.report_to == ['wandb']:
         os.environ["WANDB_PROJECT"] = training_args.project_name
 
     # Setup logging

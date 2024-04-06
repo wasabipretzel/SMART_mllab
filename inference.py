@@ -54,19 +54,22 @@ class ComputeMetric:
         #prediction 
         pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
         pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
-
+        breakpoint()
         gt_filtered = []
         pred_filtered = []
         for gt, pred_ans in zip(gt_answer_list, pred_answer_list):
             gt_flag=False
             pred_ans_flag=False
-            for each_option in candidates.keys():
+            for each_option in self.candidates.keys():
                 if each_option in gt and gt_flag == False:
-                    gt_filtered.append(self.candidate[each_option])
+                    gt_filtered.append(self.candidates[each_option])
                     gt_flag=True
                 if each_option in pred_ans and pred_ans_flag == False:
-                    pred_filtered.append(self.candidate[each_option])
+                    pred_filtered.append(self.candidates[each_option])
                     pred_ans_flag=True 
+            # pred에 아예 A,B,C,D,E 없는 경우
+            if pred_ans_flag == False:
+                pred_filtered.append(-1)
         
         metrics = self.metric.compute(references=gt_filtered, predictions=pred_filtered)
 
@@ -114,7 +117,7 @@ def inference():
     log_level = training_args.get_process_log_level()
     logger.setLevel(log_level)
 
-    logging.info("Loading Pretrained model")
+    logger.info("Loading Pretrained model")
     #load model 
     model, processor = get_model(model_args, training_args)
 
@@ -130,7 +133,7 @@ def inference():
 
 
     predictions, labels, metrics = trainer.predict(test_dataset=data_module["test_dataset"])
-    logging.info(metrics)
+    logger.info(metrics)
 
     #TODO need to add prediction / labels saving module (Optional)
 

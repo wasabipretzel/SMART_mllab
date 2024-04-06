@@ -61,14 +61,8 @@ class BaseModel(PreTrainedModel):
         #TODO : 올라오는 sample에 answer text도 있어야함. 그래야 metric 계산이 가능 
         result = self.VLM.generate(
             **sample,
-            #generation_kwargs
-            do_sample=False,
-            num_beams=5,
-            max_length=5,
-            min_length=1,
-            repetition_penalty=1.5,
-            length_penalty=1.0,
-            temperature=1,  
+            #generation_kwargs : if no parameters, -> greedy search
+            max_new_tokens=2
         )
 
         return result
