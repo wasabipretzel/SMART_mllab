@@ -8,6 +8,7 @@ Baseline code for 2024 CVPR SMART 101 challenge
 
 ## 🗓️ Schedule
 - [X] Modify Vicuna input code considering left padding
+- [ ] Add multiple learning rate optimizer
 - [ ] Add pipeline for submission format
 - [ ] Add function which create save folder when training
 - [ ] Save generation config

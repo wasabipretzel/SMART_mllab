@@ -2,7 +2,7 @@
 export CUDA_VISIBLE_DEVICES=0
 python /SMART_mllab/inference.py \
     --output_dir /data/ckpt \
-    --load_ckpt_path /data/ckpt/checkpoint-6000 \
+    --load_ckpt_path /data/ckpt/checkpoint-2000 \
     --per_device_eval_batch_size 5 \
     --do_predict True \
     --dataloader_num_workers 0 \
@@ -12,7 +12,7 @@ python /SMART_mllab/inference.py \
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 # torchrun --nproc_per_node 4 /SMART_mllab/inference.py \
 #     --output_dir /data/ckpt \
-#     --load_ckpt_path /data/ckpt/checkpoint-6000 \
+#     --load_ckpt_path /data/ckpt/checkpoint-2000 \
 #     --per_device_eval_batch_size 5 \
 #     --do_predict True \
 #     --dataloader_num_workers 8 \
