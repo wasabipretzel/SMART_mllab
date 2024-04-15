@@ -7,30 +7,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-def read_dataset_info(csvfilename):
-    import csv
-
-    qa_info = {}
-    with open(csvfilename, newline="") as csvfile:
-        datareader = csv.DictReader(csvfile)
-        for row in datareader:
-            key = str(row["type"]).lower()
-            if key not in qa_info.keys():
-                qa_info[key] = [row["id"]]
-            else:
-                qa_info[key].append(row["id"])
-    assert np.array([len(qa_info[key]) for key in qa_info.keys()]).sum() == 101
-    return qa_info
+from utils.util import read_dataset_info
 
 class Criterion:
     def __init__(self):
         super(Criterion, self).__init__()
         self.monolithic = True  # just one classifier
-        
-        # prediction된 값을 받아서 acc도 계산하고, 
-        self.puzzle_acc = {}
+
         #option, a, av 같이 받아와야함
+        self.puzzles = read_dataset_info("/data/SMART101-release-v1/puzzle_type_info.csv")
 
     def compute_metrics(self, pred):
         """_summary_
@@ -41,7 +26,7 @@ class Criterion:
                 pred.predictions : [test_samples, 257] (max_val + 1) ->  tensor
         """
         #b_options : [test_samples, 5] , b_answer_labels : [test_samples]
-        b_options, b_answer_labels = pred.inputs[0], pred.inputs[1]
+        b_options, b_answer_labels, b_pids = pred.inputs[0], pred.inputs[1], pred.inputs[2]
 
         # print(pred.inputs)
         tot_samples_num = pred.predictions.shape[0]
@@ -49,96 +34,56 @@ class Criterion:
         answer_value = torch.tensor(pred.label_ids[:,0]) #tensor [samples]
         s_acc = (pred_max == answer_value).float().sum() / tot_samples_num #NOTE 전체 수로 나눠줘야함
         #approximate to option (return array bool)
-        opt_approximate = self.get_option_sel_acc(pred_max, b_options, b_answer_labels, answer_value, -1) / tot_samples_num
+        opt_approximate = self.get_option_sel_acc(pred_max, b_options, b_answer_labels, answer_value, -1)
 
-
-
-        result = {
-            "S_acc" : s_acc,
-            "O_acc" : opt_approximate.sum()
-        }
-        return result
-
-
-
-    def print_puzz_acc(self, puzz_acc, log=True):
+        #s_acc/o_acc per puzzle id
+        puzzle_acc = {}
+        for t in list(set(b_pids)):
+            puzzle_acc[str(t)] = [
+                (pred_max == answer_value)[b_pids == t].sum(),
+                opt_approximate[b_pids == t].sum(),
+                (b_pids == t).sum()
+            ]
+        
         to_int = lambda x: np.array(list(x)).astype("int")
         cls_mean = lambda x, idx, pids: np.array([x[int(ii)] for ii in idx]).sum() / len(
             set(to_int(idx)).intersection(set(to_int(pids)))
         )
-        num_puzzles=101
-        acc_list = np.zeros(
-            num_puzzles + 1,
-        )
-        opt_acc_list = np.zeros(
-            num_puzzles + 1,
-        )
+        acc_list = np.zeros(101+1)
+        opt_acc_list = np.zeros(101+1)
+        for puzzle_id in puzzle_acc.keys():
+            acc = 100.0 * puzzle_acc[puzzle_id][0] / puzzle_acc[puzzle_id][2]
+            oacc = 100.0 * puzzle_acc[puzzle_id][1] / puzzle_acc[puzzle_id][2]
+            acc_list[int(puzzle_id)] = acc
+            opt_acc_list[int(puzzle_id)] = oacc
+        #print acc, opt_acc by puzzle id
+        for t in range(1, 101+1):
+            print("%d opt_acc(%%)=%0.2f acc(%%)=%0.2f" % (t, opt_acc_list[t], acc_list[t]), end="\t")
+            if t % 5 == 0:
+                print("\n")
+        print("\n\n")
+        class_avg_perf = {}
+        classes = ["counting", "math", "logic", "path", "algebra", "measure", "spatial", "pattern"]
+        print(classes)
+        for each_class in classes:
+            idx_list = self.puzzles[each_class]
+            class_avg_perf[each_class] = (
+                cls_mean(acc_list, idx_list, list(puzzle_acc.keys())),
+                cls_mean(opt_acc_list, idx_list, list(puzzle_acc.keys())),
+            )
+            print("%0.1f/%0.1f & " % (class_avg_perf[each_class][0], class_avg_perf[each_class][1]), end=" ")
+        print("\n\n")
 
-        # if not os.path.exists(os.path.join(args.save_root, "results/%d/" % (gv.seed))):
-        #     os.makedirs(os.path.join(args.save_root, "results/%d/" % (gv.seed)))
+        result = {
+            "S_acc" : s_acc*100,
+            "O_acc" : 100*opt_approximate.sum() / tot_samples_num
+        }
+        #result에 class별 s_acc / o_acc append 혹은 update 
+        for each_class in classes:
+            result[f"{each_class}_acc"] = class_avg_perf[each_class][0]
+            result[f"{each_class}_oacc"] = class_avg_perf[each_class][1]
 
-        if len(puzz_acc.keys()) > 10:
-            for k, key in enumerate(puzz_acc.keys()):
-                acc = 100.0 * puzz_acc[key][0] / puzz_acc[key][2]
-                oacc = 100.0 * puzz_acc[key][1] / puzz_acc[key][2]
-                acc_list[int(key)] = acc
-                opt_acc_list[int(key)] = oacc
-            if log:
-                for t in range(1, gv.num_puzzles + 1):
-                    print("%d opt_acc=%0.2f acc=%0.2f" % (t, opt_acc_list[t], acc_list[t]), end="\t")
-                    if t % 5 == 0:
-                        print("\n")
-                print("\n\n")
-
-                puzzles = read_dataset_info("/data/SMART101-release-v1/puzzle_type_info.csv")
-                class_avg_perf = {}
-                classes = ["counting", "math", "logic", "path", "algebra", "measure", "spatial", "pattern"]
-                print(classes)
-                for kk in classes:
-                    idx_list = puzzles[kk]
-                    class_avg_perf[kk] = (
-                        cls_mean(acc_list, idx_list, list(puzz_acc.keys())),
-                        cls_mean(opt_acc_list, idx_list, list(puzz_acc.keys())),
-                    )
-                    print("%0.1f/%0.1f & " % (class_avg_perf[kk][0], class_avg_perf[kk][1]), end=" ")
-                print("\n\n")
-
-            fig = plt.figure(figsize=(30, 4))
-            ax = plt.gca()
-            ax.bar(np.arange(1, gv.num_actual_puzz), fix_acc(acc_list[1:]))
-            ax.set_xticks(np.arange(1, gv.num_actual_puzz))
-            ax.set_xlabel("puzzle ids", fontsize=16)
-            ax.set_ylabel("$O_{acc}$ %", fontsize=20)
-            fig.tight_layout()
-            plt.savefig(os.path.join(args.save_root, "results/%d/acc_perf_scores_1.png" % (gv.seed)))
-            plt.close()
-
-            fig = plt.figure(figsize=(30, 4))
-            ax = plt.gca()
-            ax.bar(np.arange(1, gv.num_actual_puzz), fix_acc(opt_acc_list[1:]))
-            ax.set_xticks(np.arange(1, gv.num_actual_puzz))  # , [str(i) for i in np.arange(1,num_puzzles+1)])
-            ax.set_xlabel("puzzle ids", fontsize=16)
-            ax.set_ylabel("$S_{acc}$ %", fontsize=20)
-            fig.tight_layout()
-            plt.savefig(os.path.join(args.save_root, "results/%d/opt_acc_perf_scores_1.png" % (gv.seed)))
-            plt.close()
-        else:
-            for key in puzz_acc.keys():
-                acc = 100.0 * puzz_acc[key][0] / puzz_acc[key][2]
-                opt_acc = 100.0 * puzz_acc[key][1] / puzz_acc[key][2]
-                if log:
-                    print("%s opt_acc=%0.2f acc=%0.2f" % (key, opt_acc, acc))
-                acc_list[int(key)] = acc
-                opt_acc_list[int(key)] = opt_acc
-
-            plt.figure()
-            plt.bar(np.arange(gv.num_puzzles + 1), acc_list)
-            plt.savefig(os.path.join(args.save_root, "results/%d/acc_perf_scores.png" % (gv.seed)))
-            plt.close()
-            plt.figure()
-            plt.bar(np.arange(gv.num_puzzles + 1), opt_acc_list)
-            plt.savefig(os.path.join(args.save_root, "results/%d/opt_acc_perf_scores.png" % (gv.seed)))
-            plt.close()
+        return result
 
     def get_option_sel_acc(self, pred_ans, opts, answer, answer_values, pid):
         """converts a predicted answer to one of the given multiple choice options.

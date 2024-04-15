@@ -211,7 +211,7 @@ class SMART_starter_collator(object):
                 "answers" : b_answer, #value
                 #for eval
                 "labels" : b_answer,
-                "input_ids" : [b_options, b_answer_labels], #b_options : [B, 5] , b_answer_labels : [B]
+                "input_ids" : [b_options, b_answer_labels, b_pids], #b_options : [B, 5] , b_answer_labels : [B]
             }
         
         return inputs

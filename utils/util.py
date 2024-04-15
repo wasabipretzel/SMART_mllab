@@ -221,7 +221,20 @@ def fix_acc(acc_list):
     new_acc_list = acc_list[idx - 1]
     return new_acc_list
 
+def read_dataset_info(csvfilename):
+    import csv
 
+    qa_info = {}
+    with open(csvfilename, newline="") as csvfile:
+        datareader = csv.DictReader(csvfile)
+        for row in datareader:
+            key = str(row["type"]).lower()
+            if key not in qa_info.keys():
+                qa_info[key] = [row["puzzle_id"]]
+            else:
+                qa_info[key].append(row["puzzle_id"])
+    assert np.array([len(qa_info[key]) for key in qa_info.keys()]).sum() == 101
+    return qa_info
 
 
 class NoWarningFilter(logging.Filter):
