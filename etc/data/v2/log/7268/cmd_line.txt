@@ -1,0 +1,1 @@
+['main.py', '--data_root=/data/SMART101-release-v1/SMART101-Data', '--split_type=standard', '--num_workers=0']

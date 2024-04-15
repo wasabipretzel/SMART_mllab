@@ -1,17 +1,21 @@
 import sys
 
-import logging
+# import logging
 import numpy as np
 import torch
 from torch import nn
 from transformers import PreTrainedModel, AutoTokenizer, PretrainedConfig
+from transformers.utils import logging
 from typing import Dict, Optional, Sequence, List
 
 from models.instructblip.modeling_instructblip import InstructBlipForConditionalGeneration
 from peft import LoraConfig, get_peft_model
+from utils.util import NoWarningFilter
 
-logger = logging.getLogger(__name__)
+logger = logging.get_logger('transformers')
 logger.setLevel(logging.INFO)
+for handler in logger.handlers:
+    handler.addFilter(NoWarningFilter()) #To avoid warning msg when generating, add custom filter
 
 class BaseModel(PreTrainedModel):
 

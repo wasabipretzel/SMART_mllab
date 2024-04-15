@@ -20,6 +20,7 @@ class ModelArguments(PretrainedConfig):
     use_lora: bool=True
     lora_r: int=16
     lora_alpha: int=32
+    smart_starter_pretrained_path: str=field(default=None)
 
 
 @dataclass
