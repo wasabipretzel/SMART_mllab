@@ -2,7 +2,6 @@ import os
 import sys
 import copy
 import json
-import logging
 import pathlib
 import re
 import requests
@@ -12,7 +11,8 @@ from itertools import accumulate
 import torch
 import numpy as np
 import transformers
-from transformers import Trainer, Seq2SeqTrainer
+from transformers import Trainer, set_seed, Seq2SeqTrainer
+from transformers.utils import logging
 from datasets import load_metric
 
 from dataset.smart import *
@@ -23,7 +23,7 @@ from utils.util import count_parameters
 
 
 local_rank = None
-logger = logging.getLogger(__name__)
+logger = logging.get_logger("transformers")
 
 
 @dataclass
@@ -98,16 +98,12 @@ def inference():
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+
+    set_seed(training_args.seed)
     local_rank = training_args.local_rank
     if training_args.report_to != 'none':
         os.environ["WANDB_PROJECT"] = training_args.project_name
     
-    # Setup logging
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
     if training_args.should_log:
         # The default of training_args.log_level is passive, so we set log level at info here to have that default.
         transformers.utils.logging.set_verbosity_info()
@@ -126,7 +122,8 @@ def inference():
     trainer = Seq2SeqTrainer(model=model,
                     args=training_args,
                     compute_metrics=metric.compute_metrics,
-                    data_collator = data_module["data_collator"]
+                    data_collator = data_module["data_collator"],
+                    tokenizer=processor.tokenizer if model_args.model_type=="instructblip" else None
                     )
 
 

@@ -1,9 +1,7 @@
 import os
 import sys
-# sys.path.append("/SeqMM")
 import copy
 import json
-# import logging
 import pathlib
 import re
 import requests
@@ -57,11 +55,6 @@ def train():
 
     #using get_model 
     model, processor = get_model(model_args, training_args)
-
-    # breakpoint()
-    #NOTE : if you want to get pretrained model from url, run below code
-    # model.VLM.config.text_config.pad_token_id=2  #https://github.com/salesforce/LAVIS/issues/328 , https://github.com/huggingface/transformers/issues/22546#issuecomment-1561257076
-
 
     logger.info(f"Trainable model params : {count_parameters(model)}")
 
