@@ -28,8 +28,6 @@ from utils.util import count_parameters, NoWarningFilter
 local_rank = None
 logger = logging.get_logger("transformers")
 
-
-
 def train():
     global local_rank
 

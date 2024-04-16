@@ -13,7 +13,7 @@ def get_dataset(model_args, data_args, processor=None)-> Dict:
 
     elif model_args.model_type=="R50_BERT":
         train_dataset = SMART_starter(data_args=data_args,mode='train', processor=processor)
-        val_dataset =  SMART_starter(data_args=data_args,mode='val', processor=processor)
+        val_dataset =  SMART_starter(data_args=data_args,mode='test', processor=processor)
         data_collator = SMART_starter_collator() 
     else:
         raise NotImplementedError

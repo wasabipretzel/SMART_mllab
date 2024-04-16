@@ -4,7 +4,7 @@ import sys
 import numpy as np
 import torch
 from torch import nn
-from transformers import PreTrainedModel, AutoTokenizer, PretrainedConfig
+from transformers import PreTrainedModel, AutoTokenizer, PretrainedConfig, GenerationConfig
 from transformers.utils import logging
 from typing import Dict, Optional, Sequence, List
 
@@ -22,7 +22,11 @@ class BaseModel(PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.config = config
-        self.VLM = InstructBlipForConditionalGeneration.from_pretrained("/data/pretrained_models/instructblip-vicuna-7b")
+        self.VLM = InstructBlipForConditionalGeneration.from_pretrained(config.pretrained_model_path)
+        self.VLM.language_model.generation_config.eos_token_id=2
+        self.VLM.generation_config.eos_token_id=2
+        self.generation_config = self.VLM.generation_config
+        logger.info(f"Generation config modified same as training config : {self.VLM.generation_config}")
         if config.freeze_llm:
             for param in self.VLM.language_model.parameters():
                 param.requires_grad=False 
@@ -67,6 +71,7 @@ class BaseModel(PreTrainedModel):
             **sample,
             #generation_kwargs : if no parameters, -> greedy search
             max_new_tokens=2
+            # max_length = self.generation_config.max_length
         )
 
         return result

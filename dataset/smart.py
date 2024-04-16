@@ -142,8 +142,10 @@ class SMART_collator(object):
         #llm I/O 
         #NOTE 매 output 문장 끝에 eos token 이 붙어있는지 확인할것 
         text_input = self.processor(text=b_text_input, padding=True, truncation=True, return_tensors='pt')
+        self.processor.tokenizer.add_eos_token=True
+        self.processor.tokenizer.add_bos_token=False
         text_output = self.processor(text=b_text_output, padding=True, truncation=True, return_tensors='pt')
-
+        self.processor.tokenizer.add_eos_token=False
 
         if mode == "train":
             llm_inputs, input_part_targets_len = concat_text_input_output(

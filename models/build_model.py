@@ -3,7 +3,7 @@
     If model choice is not using processor, return None for processor
 """
 from typing import Dict, Optional, Sequence, List
-from transformers import PretrainedConfig
+from transformers import PretrainedConfig, GenerationConfig
 
 from models.basemodel import BaseModel
 from models.instructblip.processing_instructblip import InstructBlipProcessor
@@ -29,6 +29,14 @@ def get_model(model_args, training_args):
         if training_args.load_ckpt_path == None:
             processor = InstructBlipProcessor.from_pretrained(model_args.pretrained_model_path)
             model = BaseModel(model_args).to(training_args.device)
+            #add bos_token_id
+            # processor.tokenizer.add_special_tokens({'bos_token' : '<s>'})
+            # processor.tokenizer.add_bos_token=True
+            # model.VLM.generation_config = GenerationConfig(
+            #     bos_token_id=processor.tokenizer.bos_token_id,
+            #     eos_token_id=processor.tokenizer.eos_token_id,
+            #     pad_token_id=processor.tokenizer.pad_token_id
+            # )
         else:
             processor = InstructBlipProcessor.from_pretrained(model_args.pretrained_model_path)
             model_config = PretrainedConfig.from_pretrained(training_args.load_ckpt_path)

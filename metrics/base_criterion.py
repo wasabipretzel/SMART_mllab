@@ -24,13 +24,12 @@ class ComputeMetric:
         "E" : 4,
     }
     def compute_metrics(self, pred):
-
         pred.label_ids[pred.label_ids == -100] = self.tokenizer.pad_token_id #fill -100 index with pad_token_id (preventing index/overflow error)
         gt_answer_list = self.tokenizer.batch_decode(pred.label_ids, skip_special_tokens=True) #get rid of pad tokens
-
         #prediction 
         pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
         pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
+
         gt_filtered = []
         pred_filtered = []
         for gt, pred_ans in zip(gt_answer_list, pred_answer_list):
