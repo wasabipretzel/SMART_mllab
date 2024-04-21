@@ -5,12 +5,16 @@ from dataset.smart_starter import SMART_starter, SMART_starter_collator
 
 
 
-def get_dataset(model_args, data_args, processor=None)-> Dict:
+def get_dataset(model_args, data_args, mode, processor=None)-> Dict:
     if model_args.model_type=="instructblip":
-        train_dataset = SMART(data_args=data_args, mode='train')
-        val_dataset =  SMART(data_args=data_args, mode='val')
-        data_collator = SMART_collator(processor=processor) 
-
+        if mode != "test":
+            train_dataset = SMART(data_args=data_args, mode='train')
+            val_dataset =  SMART(data_args=data_args, mode='val')
+            data_collator = SMART_collator(processor=processor) 
+        else:
+            train_dataset = None
+            val_dataset =  SMART(data_args=data_args, mode='test')
+            data_collator = SMART_collator(processor=processor) 
     elif model_args.model_type=="R50_BERT":
         train_dataset = SMART_starter(data_args=data_args,mode='train', processor=processor)
         val_dataset =  SMART_starter(data_args=data_args,mode='test', processor=processor)

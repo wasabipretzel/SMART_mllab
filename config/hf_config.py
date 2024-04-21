@@ -20,15 +20,16 @@ class ModelArguments(PretrainedConfig):
     use_lora: bool=True
     lora_r: int=16
     lora_alpha: int=32
-    smart_starter_pretrained_path: str=field(default=None)
-
+    smart_starter_pretrained_path: str=field(default=None) 
 
 @dataclass
 class DataArguments:
     split_type: str="PS"
     split_path: str="/data/split"
     data_path: str="/data/SMART101-release-v1/SMART101-Data"
-    num_class: int=91
+    # num_class: int=91
+    prediction_type: str=field(default="onlyanswer") #could be onlyanswer or answervalue. Onlyanswer predict one of 'A','B','C','D','E'. Answer value predict float/str value
+   
 
 
 @dataclass
@@ -48,3 +49,5 @@ class TrainingArguments(Seq2SeqTrainingArguments):
     #generation arguments in trainer evaluate()
     predict_with_generate: bool=True # evaluate시 AR방식으로 생성해서 결과 뽑아주게함. False면 teacher forcing
     max_length=256
+    pretrained_module_lr: float=field(default=1e-6) #learning rate for pretrained moduel
+    scratch_module_lr: float=field(default=1e-4) #learning rate for modules which are trained from scratch

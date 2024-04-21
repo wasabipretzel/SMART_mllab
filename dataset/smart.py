@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, List
 import transformers
 
-from utils.util import concat_text_input_output, generation_concat_text_input_output
+from utils.util import concat_text_input_output, generation_concat_text_input_output, is_float
 
 class SMART(Dataset):
     """
@@ -28,7 +28,10 @@ class SMART(Dataset):
         #     self.processor = processor
         self.qa_info = self.get_qainfo()
         self.generate_option_key()
+        self.append_prediction_type() #use for option approximation when prediction type is 'answervalue'
         """
+            single instance example of self.qa_info
+
             {'id': '1', 
             'Question': 'How many ways are there for the feline to reach the bird if the feline can only move horizontally or vertically towards the bird in the grid?', 
             'image': 'puzzle_19_e_1.png', 
@@ -53,7 +56,25 @@ class SMART(Dataset):
                 option_values += update_msg
             qa_pair["options"] = option_values
         return
-        
+    
+    def append_prediction_type(self):
+        """_summary_
+            given self.qa_info, add value whether problem answer type is float/string. (For option approximation)
+            method : if all option value can be converted to float, answer type is float. Else string type
+            Later, string type will be approximate with embedding cosine similarity. Float type will be approximate with distance measure.
+        """
+        option_candidates = ["A","B","C","D","E"]
+        for qa_pair in self.qa_info:
+            float_flag = True
+            for each_option in option_candidates:
+                if is_float(qa_pair[each_option]) == False:
+                    float_flag = False
+            if float_flag == True:
+                qa_pair["answer_type"] = 'float'
+            else:
+                qa_pair["answer_type"] = 'string'
+        return
+
     def get_qainfo(self) -> List[dict]:
         """
             load all QA pair & image metadata
@@ -80,7 +101,13 @@ class SMART(Dataset):
 
     def get_input_text(self, qa_pair):
         #process input text -> this function can be developed for instruction tuning etc
-        prompt = "Please read the following question, select the correct answer from one of the options.\n"
+        if self.data_args.prediction_type == 'onlyanswer':
+            prompt = "Please read the following question, select the correct answer from one of the options.\n"
+        elif self.data_args.prediction_type == 'answervalue':
+            prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value.\n"
+        else:
+            raise NotImplementedError
+
         question = "Question : " + qa_pair["Question"] + '\n' + 'Options : ' + qa_pair["options"] + "\n" + "Answer : "
 
         return prompt + question
@@ -88,9 +115,37 @@ class SMART(Dataset):
     def get_output_text(self, qa_pair):
         # Answers can be modified with multi-hop reasoning process
         # answer_prefix = "Answer : "
-        answer = qa_pair["Answer"]
+        if self.data_args.prediction_type == 'onlyanswer':
+            # one of 'A','B','C','D','E'
+            answer = qa_pair["Answer"]
+        elif self.data_args.prediction_type == 'answervalue':
+            # alphabet답을 먼저 구하고 => qa_info에서 그 답을 key로 하면 value가 나옴
+            # 만약 answer_type이 float면 답안도 float. type이 string이면 답안도 string
+            answer_key = qa_pair["Answer"]
+            # if qa_pair["answer_type"] == 'float':
+            #     answer = float(qa_pair[answer_key])
+            # else:
+            #     answer = qa_pair[answer_key]
+            answer = qa_pair[answer_key] #float 의미가 없는게 tokenize될때 string이어야 함
+        else:
+            raise NotImplementedError
 
         return answer
+
+    def get_option_values(self, qa_pair):
+        """_summary_
+            given single qa pair, get option values and change it to float/string by answer type.
+        Args:
+            qa_pair (_type_): _description_
+        """
+        option_values = []
+        opts_candidates=["A","B","C","D","E"]
+        for option_key in opts_candidates:
+            if qa_pair["answer_type"] == "float":
+                option_values.append(float(qa_pair[option_key]))
+            else:
+                option_values.append(qa_pair[option_key])
+        return option_values
 
     def __len__(self):
         return len(self.qa_info)
@@ -100,6 +155,8 @@ class SMART(Dataset):
         image = self.load_image(single_qa_pair)
         text_input = self.get_input_text(single_qa_pair)
         text_output = self.get_output_text(single_qa_pair) 
+        pid = int(single_qa_pair["puzzle_id"])
+        option_values = self.get_option_values(single_qa_pair)
         data = {
             'pixel_values' : image,
             # llm input
@@ -111,6 +168,10 @@ class SMART(Dataset):
 
             # for different collator action
             'mode' : self.mode, 
+            # for evaluation
+            'pid' : pid,
+            'option_values' : option_values,
+            'answer_type' : single_qa_pair["answer_type"]
         }
 
         return data
@@ -127,6 +188,11 @@ class SMART_collator(object):
         b_qformer_text_input = []
         mode = instances[0]["mode"]
 
+        #for eval
+        # b_option_values = []
+        # b_answer_type=[]
+        # b_pids=[]
+
         for each_batch in instances:
             #qformer input
             b_pixel_values.append(each_batch["pixel_values"]) 
@@ -134,6 +200,10 @@ class SMART_collator(object):
             #llm I/O
             b_text_input.append(each_batch["text_input"])
             b_text_output.append(each_batch["text_output"])
+            # #for eval
+            # b_option_values.append(each_batch["option_values"])
+            # b_answer_type.append(each_batch["answer_type"])
+            # b_pids.append(each_batch["pid"])
 
 
         #qformer input
@@ -144,7 +214,12 @@ class SMART_collator(object):
         text_input = self.processor(text=b_text_input, padding=True, truncation=True, return_tensors='pt')
         self.processor.tokenizer.add_eos_token=True
         self.processor.tokenizer.add_bos_token=False
-        text_output = self.processor(text=b_text_output, padding=True, truncation=True, return_tensors='pt')
+        if mode == "train":
+            text_output = self.processor(text=b_text_output, padding=True, truncation=True, return_tensors='pt')
+        else:
+            self.processor.tokenizer.padding_side="right"
+            text_output = self.processor(text=b_text_output, padding=True, truncation=True, return_tensors='pt')
+            self.processor.tokenizer.padding_side="left"
         self.processor.tokenizer.add_eos_token=False
 
         if mode == "train":
@@ -171,22 +246,37 @@ class SMART_collator(object):
                 "labels" : targets,
             }
         else:
-            llm_inputs, answer_labels = generation_concat_text_input_output(
-                text_input.input_ids,
-                text_input.attention_mask,
-                text_output.input_ids,
-                text_output.attention_mask,
-            )
+            # llm_inputs, answer_labels = generation_concat_text_input_output(
+            #     text_input.input_ids,
+            #     text_input.attention_mask,
+            #     text_output.input_ids,
+            #     text_output.attention_mask,
+            # )
 
+            # inputs = {
+            #     "pixel_values" : image_input.pixel_values,
+            #     "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
+            #     "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
+            #     # for generation, need different input_ids and att_mask
+            #     "input_ids" : llm_inputs["input_ids"],
+            #     "attention_mask" : llm_inputs["attention_mask"],
+            #     "labels" : answer_labels,
+            #     #for eval
+            #     "eval_ingredients" : [b_option_values, b_answer_type, b_pids] 
+            # } 
             inputs = {
                 "pixel_values" : image_input.pixel_values,
                 "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
                 "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
                 # for generation, need different input_ids and att_mask
-                "input_ids" : llm_inputs["input_ids"],
-                "attention_mask" : llm_inputs["attention_mask"],
-                "labels" : answer_labels,
+                "input_ids" : text_input.input_ids,
+                "attention_mask" : text_input.attention_mask,
+                "labels" : text_output.input_ids,
+                #for eval
+                # "eval_ingredients" : [b_option_values, b_answer_type, b_pids] 
             } 
         
         return inputs
+
+
 

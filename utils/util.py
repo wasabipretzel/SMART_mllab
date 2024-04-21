@@ -61,6 +61,7 @@ def generation_concat_text_input_output(input_ids, input_atts, output_ids, outpu
                 output_ids[i][:this_output_ones], #target 앞에 붙은 padding을 input 맨 앞에
                 input_ids[i], #already left padded
                 #generation input에는 answer필요없으므로 제거
+                #NOTE : 이걸 해주면 answer중에 padding이 다른 경우에는 문제가 됨. generation때는 그냥 input은 그대로 넣으면 되고 answer도 
             ])
         )
         answer_labels.append(
@@ -75,7 +76,10 @@ def generation_concat_text_input_output(input_ids, input_atts, output_ids, outpu
                 input_atts[i],
             ])
         )
-    llm_tokens['input_ids'] = torch.stack(llm_tokens['input_ids'])
+    try:
+        llm_tokens['input_ids'] = torch.stack(llm_tokens['input_ids'])
+    except:
+        breakpoint()
     llm_tokens['attention_mask'] = torch.stack(llm_tokens['attention_mask'])
     answer_labels = torch.stack(answer_labels)
     return llm_tokens, answer_labels
@@ -244,3 +248,93 @@ class NoWarningFilter(logging.Filter):
             return False
         else:
             return True
+
+def set_save_dir(model_args, data_args, training_args):
+    """_summary_
+        modify output_dir to be '{training_args.output_dir}/{model_args.model_type}/{data_args.prediction_type}/{run_name}'
+        For diverse experiments
+        + 만약 저장하는 option이 없다 -> 그냥 return하기 
+    Args:
+        model_args (_type_): _description_
+        data_args (_type_): _description_
+        training_args (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    if training_args.save_strategy == "no":
+        return training_args
+
+    modified_output_dir = ""
+    if training_args.run_name == None:
+        raise ValueError("Training argument 'run_name' is not defined, but 'save_strategy' argument defined. Checkpoints \
+                            should save under '(training_args.output_dir)/(model_args.model_type)/(data_args.prediction_type)/(run_name)/' \
+                            please set 'run_name' argument from your shell script")
+    else:
+        modified_output_dir = os.path.join(training_args.output_dir, model_args.model_type, data_args.prediction_type, training_args.run_name)
+        training_args.output_dir = modified_output_dir
+
+    return training_args
+
+
+def is_float(value):
+    """
+        value을 '3.0', '3', 'x 3', 'PM 16:00' 이런식으로 다양하게 나오기에 채점하기 알맞게 바꿔줘야함
+        기본적으로 int/float가 아닌 경우 embedding유사한 걸로 근사
+        주의) 
+        1. '+ 3' 같은 경우 float, int처리하면 그냥 3으로 나와버림 
+        2. '- 3' 같이 연산을 답으로 하는 경우가 있는 반면, '-3'같은 그냥 음수의 숫자가 답인 경우가 있는데 이를 구분해야 함
+
+    Args:
+        value (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    try:
+        # Try converting to an integer
+        num = float(value)
+        return True
+    except ValueError:
+        return False
+
+
+def cosine_similarity(vector1, vector2):
+    # Convert lists to NumPy arrays for efficient calculations
+    vector1 = np.array(vector1)
+    vector2 = np.array(vector2)
+    
+    # Compute dot product
+    dot_product = np.dot(vector1, vector2)
+    
+    # Compute magnitudes
+    magnitude1 = np.linalg.norm(vector1)
+    magnitude2 = np.linalg.norm(vector2)
+    
+    # Compute cosine similarity
+    similarity = dot_product / (magnitude1 * magnitude2)
+    
+    return similarity
+
+
+def bertemb_test():
+    from sentence_transformers import SentenceTransformer
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    sentence = ['-7', '/7','/4','/1','/9']
+    target = ['-8']
+
+    embeddings = model.encode(sentence)
+    target_embedding = model.encode(target)
+
+
+    breakpoint()
+    
+    
+
+
+
+
+# if __name__ == '__main__':
+#     # value = 3.0
+#     # print(convert_to_number(value))
+#     bertemb_test()

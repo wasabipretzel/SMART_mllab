@@ -28,9 +28,9 @@ class BaseModel(PreTrainedModel):
         self.generation_config = self.VLM.generation_config
         logger.info(f"Generation config modified same as training config : {self.VLM.generation_config}")
         if config.freeze_llm:
-            for param in self.VLM.language_model.parameters():
+            for param in self.VLM.language_model.parameters(): 
                 param.requires_grad=False 
-        if config.freeze_image_encoder:
+        if config.freeze_image_encoder: #900M
             for param in self.VLM.vision_model.parameters():
                 param.requires_grad=False  
         if config.use_bf16:
@@ -48,6 +48,8 @@ class BaseModel(PreTrainedModel):
             self.VLM.language_model = get_peft_model(self.VLM.language_model, lora_config) # LlavaLlamaForCausalLM -> PeftModelForCausalLM 모델 변경
 
     def forward(self, return_loss=True, **sample):
+        # if "eval_ingredients" in sample.keys():
+        #     del sample["eval_ingredients"]
         result = self.VLM(
             **sample
         ) #['loss', 'logits', 'vision_outputs', 'qformer_outputs', 'language_model_outputs']
@@ -67,6 +69,8 @@ class BaseModel(PreTrainedModel):
     @torch.no_grad()
     def generate(self, **sample):
         #TODO : 올라오는 sample에 answer text도 있어야함. 그래야 metric 계산이 가능 
+        # eval_ingredients = sample["eval_ingredients"]
+        # del sample["eval_ingredients"]
         result = self.VLM.generate(
             **sample,
             #generation_kwargs : if no parameters, -> greedy search

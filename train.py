@@ -19,21 +19,26 @@ from config.hf_config import *
 from models.basemodel import *
 from models.build_model import get_model
 from metrics.build_metric import get_metric
+from trainers.build_trainer import get_trainer
 from dataset.build_dataset import get_dataset
-from utils.util import count_parameters, NoWarningFilter
+from utils.util import count_parameters, NoWarningFilter, set_save_dir
 
 
 local_rank = None
 logger = logging.get_logger("transformers")
+for handler in logger.handlers:
+    handler.addFilter(NoWarningFilter()) #To avoid warning msg when generating, add custom filter
 
 def train():
     global local_rank
-
+    mode = "train_eval"
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
+        
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-
+    training_args=set_save_dir(model_args, data_args, training_args)
     set_seed(training_args.seed)
+
     local_rank = training_args.local_rank
     if training_args.report_to == ['wandb']:
         os.environ["WANDB_PROJECT"] = training_args.project_name
@@ -51,23 +56,26 @@ def train():
         + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
     )
     
-    logger.info("initializing")
+    logger.info("Initializing model and processor")
 
-    #using get_model 
     model, processor = get_model(model_args, training_args)
 
     logger.info(f"Trainable model params : {count_parameters(model)}")
 
     # craete dataset & collator
-    data_module = get_dataset(model_args, data_args, processor=processor)
+    data_module = get_dataset(model_args, data_args, mode, processor=processor)
 
-    metric = get_metric(model_args, processor)
+    # For evaluation phase, we need embeddings of llm
+    embeddings = copy.deepcopy(model.VLM.language_model.get_input_embeddings())
+    metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"])
 
-    trainer = Seq2SeqTrainer(model=model,
-                    args=training_args,
-                    compute_metrics=metric.compute_metrics,
-                    tokenizer=processor.tokenizer if model_args.model_type=="instructblip" else None, #for prediction
-                    **data_module)
+    trainer = get_trainer(model_args, training_args, model, metric, processor, data_module)
+
+    # trainer = Seq2SeqTrainer(model=model,
+    #                 args=training_args,
+    #                 compute_metrics=metric.compute_metrics,
+    #                 tokenizer=processor.tokenizer if model_args.model_type=="instructblip" else None, #for prediction
+    #                 **data_module)
 
 
     trainer.train()

@@ -19,59 +19,14 @@ from dataset.smart import *
 from config.hf_config import *
 from models.basemodel import *
 from models.build_model import get_model
-from utils.util import count_parameters
-
+from metrics.build_metric import get_metric
+from dataset.build_dataset import get_dataset
+from utils.util import count_parameters, NoWarningFilter
 
 local_rank = None
 logger = logging.get_logger("transformers")
-
-
-@dataclass
-class ComputeMetric:
-    tokenizer: transformers.PreTrainedTokenizer
-    """
-    EvalPrediction(predictions=preds, label_ids=label_ids, inputs=inputs_ids)
-        get all logits, labels after all eval_step
-       pred.predictions (얘가 맞는듯) (300, 182)
-       pred.label_ids  (얜 죄다 -100) (300, 124)
-        predictions (`np.ndarray`): Predictions of the model.
-        label_ids (`np.ndarray`): Targets to be matched.
-       tokenizer을 넣어줘야하는듯. 
-    """
-    metric = load_metric("accuracy")
-    candidates = {
-        "A" : 0,
-        "B" : 1,
-        "C" : 2,
-        "D" : 3,
-        "E" : 4,
-    }
-    def compute_metrics(self, pred):
-
-        pred.label_ids[pred.label_ids == -100] = self.tokenizer.pad_token_id #fill -100 index with pad_token_id (preventing index/overflow error)
-        gt_answer_list = self.tokenizer.batch_decode(pred.label_ids, skip_special_tokens=True) #get rid of pad tokens
-        #prediction 
-        pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
-        pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
-        gt_filtered = []
-        pred_filtered = []
-        for gt, pred_ans in zip(gt_answer_list, pred_answer_list):
-            gt_flag=False
-            pred_ans_flag=False
-            for each_option in self.candidates.keys():
-                if each_option in gt and gt_flag == False:
-                    gt_filtered.append(self.candidates[each_option])
-                    gt_flag=True
-                if each_option in pred_ans and pred_ans_flag == False:
-                    pred_filtered.append(self.candidates[each_option])
-                    pred_ans_flag=True 
-            # pred에 아예 A,B,C,D,E 없는 경우
-            if pred_ans_flag == False:
-                pred_filtered.append(-1)
-        
-        metrics = self.metric.compute(references=gt_filtered, predictions=pred_filtered)
-
-        return metrics
+for handler in logger.handlers:
+    handler.addFilter(NoWarningFilter()) #To avoid warning msg when generating, add custom filter
 
 
 def make_test_module(data_args, processor=None) -> Dict:
@@ -94,7 +49,7 @@ def inference():
     """
 
     global local_rank
-
+    mode = 'test'
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
@@ -116,18 +71,20 @@ def inference():
     model, processor = get_model(model_args, training_args)
 
     ## DataLoader
-    data_module = make_test_module(data_args=data_args, processor=processor)
-    metric = ComputeMetric(processor.tokenizer)
+    data_module = get_dataset(model_args, data_args, mode, processor=processor)
+
+    embeddings = copy.deepcopy(model.VLM.language_model.get_input_embeddings())
+    metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"])
 
     trainer = Seq2SeqTrainer(model=model,
                     args=training_args,
                     compute_metrics=metric.compute_metrics,
                     data_collator = data_module["data_collator"],
-                    tokenizer=processor.tokenizer if model_args.model_type=="instructblip" else None
+                    tokenizer=processor.tokenizer if model_args.model_type=="instructblip" else None,
                     )
 
 
-    predictions, labels, metrics = trainer.predict(test_dataset=data_module["test_dataset"])
+    predictions, labels, metrics = trainer.predict(test_dataset=data_module["eval_dataset"])
     logger.info(metrics)
 
     #TODO need to add prediction / labels saving module (Optional)
