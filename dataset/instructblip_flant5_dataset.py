@@ -212,7 +212,7 @@ class InstructblipFlant5_collator(object):
         if mode == "train":
             #target
             targets = text_output.input_ids.masked_fill(
-                text_output.input_ids == self.processor.tokenizer.pad_token_id, -100  #NOTE 이러면 eos token이 pad_token_id와 같기 때문에 -100으로 학습 안되는 것 아닌가?
+                text_output.input_ids == self.processor.tokenizer.pad_token_id, -100 
             )
             inputs = {
                 "pixel_values" : image_input.pixel_values,
