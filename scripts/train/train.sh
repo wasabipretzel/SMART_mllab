@@ -35,8 +35,8 @@ python /SMART_mllab/train.py \
     --per_device_eval_batch_size 5 \
     --gradient_accumulation_steps 1 \
     --evaluation_strategy steps \
-    --eval_steps 10 \
-    --save_strategy steps \
+    --eval_steps 2 \
+    --save_strategy no \
     --save_steps 1 \
     --save_total_limit 20 \
     --learning_rate 5e-5 \

@@ -8,7 +8,7 @@ def get_trainer(model_args, training_args, model, metric, processor, data_module
                     model=model,
                     args=training_args,
                     compute_metrics=metric.compute_metrics,
-                    tokenizer=processor.tokenizer if model_args.model_type=="instructblip" else None, #for prediction
+                    tokenizer=processor.tokenizer,
                     **data_module
                 )
     elif model_args.model_type=="R50_BERT":

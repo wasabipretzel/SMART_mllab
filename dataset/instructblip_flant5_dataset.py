@@ -208,12 +208,11 @@ class InstructblipFlant5_collator(object):
         self.processor.tokenizer.add_eos_token=True
         text_output = self.processor(text=b_text_output, padding=True, truncation=True, return_tensors='pt')
         self.processor.tokenizer.add_eos_token=False
-
+        #target
+        targets = text_output.input_ids.masked_fill(
+            text_output.input_ids == self.processor.tokenizer.pad_token_id, -100 
+        )
         if mode == "train":
-            #target
-            targets = text_output.input_ids.masked_fill(
-                text_output.input_ids == self.processor.tokenizer.pad_token_id, -100 
-            )
             inputs = {
                 "pixel_values" : image_input.pixel_values,
                 "qformer_input_ids" : qformer_text_input["qformer_input_ids"],

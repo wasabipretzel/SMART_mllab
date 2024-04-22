@@ -66,18 +66,14 @@ def train():
     data_module = get_dataset(model_args, data_args, mode, processor=processor)
 
     # For evaluation phase, we need embeddings of llm
-    embeddings = copy.deepcopy(model.VLM.language_model.get_input_embeddings())
+    if "instructblip" in model_args.model_type:
+        embeddings = copy.deepcopy(model.VLM.language_model.get_input_embeddings())
+    else:
+        embeddings= None
     metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"])
 
     trainer = get_trainer(model_args, training_args, model, metric, processor, data_module)
-
-    # trainer = Seq2SeqTrainer(model=model,
-    #                 args=training_args,
-    #                 compute_metrics=metric.compute_metrics,
-    #                 tokenizer=processor.tokenizer if model_args.model_type=="instructblip" else None, #for prediction
-    #                 **data_module)
-
-
+    
     trainer.train()
     trainer.save_model(training_args.output_dir)
     trainer.save_state()

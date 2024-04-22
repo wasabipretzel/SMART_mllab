@@ -9,58 +9,12 @@ import numpy as np
 from utils.util import is_float, read_dataset_info
 
 @dataclass
-class ComputeMetric:
-    tokenizer: transformers.PreTrainedTokenizer
-    """
-    EvalPrediction(predictions=preds, label_ids=label_ids, inputs=inputs_ids)
-        get all logits, labels after all eval_step
-       pred.predictions (얘가 맞는듯) (300, 182)
-       pred.label_ids  (얜 죄다 -100) (300, 124)
-        predictions (`np.ndarray`): Predictions of the model.
-        label_ids (`np.ndarray`): Targets to be matched.
-       tokenizer을 넣어줘야하는듯. 
-    """
-    metric = load_metric("accuracy")
-    candidates = {
-        "A" : 0,
-        "B" : 1,
-        "C" : 2,
-        "D" : 3,
-        "E" : 4,
-    }
-    def compute_metrics(self, pred):
-        pred.label_ids[pred.label_ids == -100] = self.tokenizer.pad_token_id #fill -100 index with pad_token_id (preventing index/overflow error)
-        gt_answer_list = self.tokenizer.batch_decode(pred.label_ids, skip_special_tokens=True) #get rid of pad tokens
-        #prediction 
-        pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
-        pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
-
-        gt_filtered = []
-        pred_filtered = []
-        for gt, pred_ans in zip(gt_answer_list, pred_answer_list):
-            gt_flag=False
-            pred_ans_flag=False
-            for each_option in self.candidates.keys():
-                if each_option in gt and gt_flag == False:
-                    gt_filtered.append(self.candidates[each_option])
-                    gt_flag=True
-                if each_option in pred_ans and pred_ans_flag == False:
-                    pred_filtered.append(self.candidates[each_option])
-                    pred_ans_flag=True 
-            # pred에 아예 A,B,C,D,E 없는 경우
-            if pred_ans_flag == False:
-                pred_filtered.append(-1)
-        
-        metrics = self.metric.compute(references=gt_filtered, predictions=pred_filtered)
-
-        return metrics
-
-@dataclass
 class ComputeMetricAnswerKey:
 
     tokenizer: transformers.PreTrainedTokenizer
     vicuna_embedding: transformers.PreTrainedModel
     eval_dataset: torch.utils.data.Dataset
+    puzzle_path: str
 
     def __post_init__(self):
 
@@ -94,7 +48,7 @@ class ComputeMetricAnswerKey:
         }
         # self.candidates = ["A","B","C","D","E"]
         self.cossim = CosineSimilarity(dim=1)
-        self.puzzles = read_dataset_info("/data/SMART101-release-v1/puzzle_type_info.csv") #TODO remove hard coding
+        self.puzzles = read_dataset_info(self.puzzle_path) #TODO remove hard coding
     # method
     # 1. pred 같이 밀어올리는 부분은 self.qa_info의 answer type, options(option들의 값), pids 
     # 2. pred.predictions을 pad_token_id제외하고 batch_decode
@@ -222,6 +176,7 @@ class ComputeMetricAnswerValue:
     tokenizer: transformers.PreTrainedTokenizer
     vicuna_embedding: transformers.PreTrainedModel
     eval_dataset: torch.utils.data.Dataset
+    puzzle_path: str
 
     def __post_init__(self):
 
@@ -248,7 +203,7 @@ class ComputeMetricAnswerValue:
         """
         self.candidates = ["A","B","C","D","E"]
         self.cossim = CosineSimilarity(dim=1)
-        self.puzzles = read_dataset_info("/data/SMART101-release-v1/puzzle_type_info.csv") #TODO remove hard coding
+        self.puzzles = read_dataset_info(self.puzzle_path) #TODO remove hard coding
     # method
     # 1. pred 같이 밀어올리는 부분은 self.qa_info의 answer type, options(option들의 값), pids 
     # 2. pred.predictions을 pad_token_id제외하고 batch_decode

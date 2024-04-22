@@ -27,6 +27,7 @@ class DataArguments:
     split_type: str="PS"
     split_path: str="/data/split"
     data_path: str="/data/SMART101-release-v1/SMART101-Data"
+    puzzle_path: str="/data/SMART101-release-v1/puzzle_type_info.csv"
     # num_class: int=91
     prediction_type: str=field(default="onlyanswer") #could be ["onlyanswer","answervalue"]. Onlyanswer predict one of 'A','B','C','D','E'. Answer value predict float/str value
    
