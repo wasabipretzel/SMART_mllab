@@ -28,6 +28,8 @@ export CUDA_VISIBLE_DEVICES=0
 python /SMART_mllab/train.py \
     --output_dir /data/key_ckpt \
     --prediction_type onlyanswer \
+    --model_type instructblip_flant5 \
+    --pretrained_model_path Salesforce/instructblip-flan-t5-xxl \
     --num_train_epochs 10 \
     --per_device_train_batch_size 10 \
     --per_device_eval_batch_size 5 \
@@ -50,3 +52,5 @@ python /SMART_mllab/train.py \
 
 #report_to : ["none", "wandb", ..]
 #save_strategy : ["steps", "epochs", "no"]
+#model_type : ["instructblip_vicuna", "instructblip_flant5"]
+#pretrained_model_path : ["Salesforce/instructblip-vicuna-7b","Salesforce/instructblip-flan-t5-xxl"]

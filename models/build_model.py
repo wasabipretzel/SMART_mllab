@@ -25,7 +25,7 @@ def get_model(model_args, training_args):
     Returns:
         _type_: initialized model or processor
     """
-    if model_args.model_type == "instructblip":
+    if "instructblip" in model_args.model_type:
         if training_args.load_ckpt_path == None:
             processor = InstructBlipProcessor.from_pretrained(model_args.pretrained_model_path)
             model = BaseModel(model_args).to(training_args.device)

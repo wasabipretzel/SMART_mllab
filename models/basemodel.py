@@ -1,21 +1,20 @@
 import sys
 
-# import logging
 import numpy as np
 import torch
 from torch import nn
 from transformers import PreTrainedModel, AutoTokenizer, PretrainedConfig, GenerationConfig
 from transformers.utils import logging
 from typing import Dict, Optional, Sequence, List
+from peft import LoraConfig, get_peft_model
 
 from models.instructblip.modeling_instructblip import InstructBlipForConditionalGeneration
-from peft import LoraConfig, get_peft_model
 from utils.util import NoWarningFilter
 
 logger = logging.get_logger('transformers')
 logger.setLevel(logging.INFO)
 for handler in logger.handlers:
-    handler.addFilter(NoWarningFilter()) #To avoid warning msg when generating, add custom filter
+    handler.addFilter(NoWarningFilter()) #To avoid warning msg when generating (max_new_token), add custom filter
 
 class BaseModel(PreTrainedModel):
 
@@ -23,10 +22,11 @@ class BaseModel(PreTrainedModel):
         super().__init__(config)
         self.config = config
         self.VLM = InstructBlipForConditionalGeneration.from_pretrained(config.pretrained_model_path)
-        self.VLM.language_model.generation_config.eos_token_id=2
-        self.VLM.generation_config.eos_token_id=2
+        if config.model_type=="instructblip_vicuna":
+            self.VLM.language_model.generation_config.eos_token_id=2
+            self.VLM.generation_config.eos_token_id=2
+            logger.info(f"Generation config modified same as training config : {self.VLM.generation_config}")
         self.generation_config = self.VLM.generation_config
-        logger.info(f"Generation config modified same as training config : {self.VLM.generation_config}")
         if config.freeze_llm:
             for param in self.VLM.language_model.parameters(): 
                 param.requires_grad=False 
@@ -36,27 +36,36 @@ class BaseModel(PreTrainedModel):
         if config.use_bf16:
             self.VLM.to(torch.bfloat16)
         if config.use_lora:
-            lora_config = LoraConfig(
-                r=config.lora_r,
-                lora_alpha=config.lora_alpha,
-                target_modules=["q_proj","v_proj"],
-                lora_dropout=0.05,
-                bias='none',
-                task_type="CAUSAL_LM",
-            )
             logger.info("Adding LoRA adapters...")
-            self.VLM.language_model = get_peft_model(self.VLM.language_model, lora_config) # LlavaLlamaForCausalLM -> PeftModelForCausalLM 모델 변경
+            if config.model_type=="instructblip_vicuna":
+                lora_config = LoraConfig(
+                    r=config.lora_r,
+                    lora_alpha=config.lora_alpha,
+                    target_modules=["q_proj","v_proj"],
+                    lora_dropout=config.lora_dropout,
+                    bias='none',
+                    task_type="CAUSAL_LM",
+                )
+            elif config.model_type=="instructblip_flant5":
+                lora_config = LoraConfig(
+                    r = config.lora_r,
+                    lora_alpha=config.lora_alpha,
+                    target_modules=["q", "v"],
+                    lora_dropout=config.lora_dropout,
+                    bias="none",
+                    task_type="SEQ_2_SEQ_LM"
+                )
+            else:
+                raise NotImplementedError
+
+            self.VLM.language_model = get_peft_model(self.VLM.language_model, lora_config)
 
     def forward(self, return_loss=True, **sample):
-        # if "eval_ingredients" in sample.keys():
-        #     del sample["eval_ingredients"]
         result = self.VLM(
             **sample
         ) #['loss', 'logits', 'vision_outputs', 'qformer_outputs', 'language_model_outputs']
 
         #language_model_outputs.logits.shape -> [B, S, vocab]
-
-        #logits vs language_mode_outputs?
         # logits은 language_model_outputs.logits과 동일함 
         
         output = {
@@ -68,9 +77,7 @@ class BaseModel(PreTrainedModel):
 
     @torch.no_grad()
     def generate(self, **sample):
-        #TODO : 올라오는 sample에 answer text도 있어야함. 그래야 metric 계산이 가능 
-        # eval_ingredients = sample["eval_ingredients"]
-        # del sample["eval_ingredients"]
+
         result = self.VLM.generate(
             **sample,
             #generation_kwargs : if no parameters, -> greedy search

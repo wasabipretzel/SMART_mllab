@@ -11,9 +11,9 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, List
 import transformers
 
-from utils.util import concat_text_input_output, generation_concat_text_input_output, is_float
+from utils.util import is_float
 
-class SMART(Dataset):
+class InstructblipFlant5Dataset(Dataset):
     """
         single image를 읽고 processing해서 올린다 (instructblip processor어디서 동작하는지 찾아볼것)
         question and answer 밀어올리는 방식은 
@@ -24,8 +24,6 @@ class SMART(Dataset):
 
         self.data_args = data_args
         self.mode = mode
-        # if processor != None:
-        #     self.processor = processor
         self.qa_info = self.get_qainfo()
         self.generate_option_key()
         self.append_prediction_type() #use for option approximation when prediction type is 'answervalue'
@@ -177,8 +175,12 @@ class SMART(Dataset):
         return data
 
 @dataclass
-class SMART_collator(object):
+class InstructblipFlant5_collator(object):
     """Collate examples for supervised fine-tuning."""
+    """
+        flant5의 경우, input : text, output : text + eos token만 붙히면 나머지는 t5안에서 처리를 해준다. 
+        flant5은 right padding이 기본
+    """
     processor:transformers.ProcessorMixin
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
@@ -188,11 +190,6 @@ class SMART_collator(object):
         b_qformer_text_input = []
         mode = instances[0]["mode"]
 
-        #for eval
-        # b_option_values = []
-        # b_answer_type=[]
-        # b_pids=[]
-
         for each_batch in instances:
             #qformer input
             b_pixel_values.append(each_batch["pixel_values"]) 
@@ -200,70 +197,35 @@ class SMART_collator(object):
             #llm I/O
             b_text_input.append(each_batch["text_input"])
             b_text_output.append(each_batch["text_output"])
-            # #for eval
-            # b_option_values.append(each_batch["option_values"])
-            # b_answer_type.append(each_batch["answer_type"])
-            # b_pids.append(each_batch["pid"])
-
 
         #qformer input
         image_input = self.processor(images=b_pixel_values, return_tensors='pt')
         qformer_text_input = self.processor(text=b_qformer_text_input, padding=True, truncation=True, return_tensors='pt')
         #llm I/O 
-        #NOTE 매 output 문장 끝에 eos token 이 붙어있는지 확인할것 
         text_input = self.processor(text=b_text_input, padding=True, truncation=True, return_tensors='pt')
+        #flant5은 항상 right padding이기에 train/test에 따라 padding side신경쓸 필요없음
+        #대신 output에 eos token을 끝에 붙혀야하기에 이 부분만 조절
         self.processor.tokenizer.add_eos_token=True
-        self.processor.tokenizer.add_bos_token=False
-        if mode == "train":
-            text_output = self.processor(text=b_text_output, padding=True, truncation=True, return_tensors='pt')
-        else:
-            self.processor.tokenizer.padding_side="right"
-            text_output = self.processor(text=b_text_output, padding=True, truncation=True, return_tensors='pt')
-            self.processor.tokenizer.padding_side="left"
+        text_output = self.processor(text=b_text_output, padding=True, truncation=True, return_tensors='pt')
         self.processor.tokenizer.add_eos_token=False
 
         if mode == "train":
-            llm_inputs, input_part_targets_len = concat_text_input_output(
-                text_input.input_ids,
-                text_input.attention_mask,
-                text_output.input_ids,
-                text_output.attention_mask,
-            )
             #target
-            targets = llm_inputs["input_ids"].masked_fill(
-                llm_inputs["input_ids"] == self.processor.tokenizer.pad_token_id, -100
+            targets = text_output.input_ids.masked_fill(
+                text_output.input_ids == self.processor.tokenizer.pad_token_id, -100  #NOTE 이러면 eos token이 pad_token_id와 같기 때문에 -100으로 학습 안되는 것 아닌가?
             )
-            for batch_idx, input_length in enumerate(input_part_targets_len):
-                targets[batch_idx][:input_length] = -100
-
+            breakpoint()
             inputs = {
                 "pixel_values" : image_input.pixel_values,
                 "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
                 "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
-                #NOTE -> text_input processor거쳐서 무슨 key로 해야 input_ids가 나옴?
-                "input_ids" : llm_inputs["input_ids"],
-                "attention_mask" : llm_inputs["attention_mask"],
+                "input_ids" : text_input.input_ids,
+                "attention_mask" : text_input.attention_mask,
+                "decoder_input_ids" : text_output.input_ids,
+                "decoder_attention_mask" : text_output.attention_mask,
                 "labels" : targets,
             }
         else:
-            # llm_inputs, answer_labels = generation_concat_text_input_output(
-            #     text_input.input_ids,
-            #     text_input.attention_mask,
-            #     text_output.input_ids,
-            #     text_output.attention_mask,
-            # )
-
-            # inputs = {
-            #     "pixel_values" : image_input.pixel_values,
-            #     "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
-            #     "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
-            #     # for generation, need different input_ids and att_mask
-            #     "input_ids" : llm_inputs["input_ids"],
-            #     "attention_mask" : llm_inputs["attention_mask"],
-            #     "labels" : answer_labels,
-            #     #for eval
-            #     "eval_ingredients" : [b_option_values, b_answer_type, b_pids] 
-            # } 
             inputs = {
                 "pixel_values" : image_input.pixel_values,
                 "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
@@ -271,9 +233,7 @@ class SMART_collator(object):
                 # for generation, need different input_ids and att_mask
                 "input_ids" : text_input.input_ids,
                 "attention_mask" : text_input.attention_mask,
-                "labels" : text_output.input_ids,
-                #for eval
-                # "eval_ingredients" : [b_option_values, b_answer_type, b_pids] 
+                "labels" : targets,
             } 
         
         return inputs

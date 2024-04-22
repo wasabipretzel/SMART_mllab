@@ -11,15 +11,15 @@ from functools import partial
 
 @dataclass
 class ModelArguments(PretrainedConfig):
-    model_type:str="instructblip"
-    pretrained_model_path: str="Salesforce/instructblip-vicuna-7b" #can be switched with url or saved pretrained model path 
+    model_type: str=field(default="instructblip_vicuna") #["instructblip_vicuna", "instructblip_flant5", "R50_BERT"]
+    pretrained_model_path: str=field(default="Salesforce/instructblip-vicuna-7b") #can be switched with url or saved pretrained model path , "Salesforce/instructblip-flan-t5-xxl"
     freeze_llm: bool=True
     freeze_image_encoder: bool=True
     use_bf16: bool=True
-    # keys_to_ignore_at_inference: List[str]=field(default_factory=partial(list, ["qformer_outputs", 'vision_outputs'])) -> model forward return 의 key값을 바꿔주면 됨
     use_lora: bool=True
     lora_r: int=16
     lora_alpha: int=32
+    lora_dropout: float=0.05
     smart_starter_pretrained_path: str=field(default=None) 
 
 @dataclass
@@ -28,7 +28,7 @@ class DataArguments:
     split_path: str="/data/split"
     data_path: str="/data/SMART101-release-v1/SMART101-Data"
     # num_class: int=91
-    prediction_type: str=field(default="onlyanswer") #could be onlyanswer or answervalue. Onlyanswer predict one of 'A','B','C','D','E'. Answer value predict float/str value
+    prediction_type: str=field(default="onlyanswer") #could be ["onlyanswer","answervalue"]. Onlyanswer predict one of 'A','B','C','D','E'. Answer value predict float/str value
    
 
 
@@ -46,8 +46,8 @@ class TrainingArguments(Seq2SeqTrainingArguments):
     seed: int=42
     should_log: bool=True
     ddp_find_unused_parameters: bool=False
+    pretrained_module_lr: float=field(default=1e-6) #learning rate for pretrained moduel
+    scratch_module_lr: float=field(default=1e-4) #learning rate for modules which are trained from scratch
     #generation arguments in trainer evaluate()
     predict_with_generate: bool=True # evaluate시 AR방식으로 생성해서 결과 뽑아주게함. False면 teacher forcing
     max_length=256
-    pretrained_module_lr: float=field(default=1e-6) #learning rate for pretrained moduel
-    scratch_module_lr: float=field(default=1e-4) #learning rate for modules which are trained from scratch

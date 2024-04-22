@@ -14,9 +14,9 @@ import transformers
 from transformers import Trainer, set_seed, Seq2SeqTrainer
 from transformers.utils import logging
 
-from dataset.smart import *
+
 from config.hf_config import *
-from models.basemodel import *
+from dataset.build_dataset import get_dataset
 from models.build_model import get_model
 from metrics.build_metric import get_metric
 from trainers.build_trainer import get_trainer
