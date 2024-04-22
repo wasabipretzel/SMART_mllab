@@ -8,12 +8,12 @@ Baseline code for 2024 CVPR SMART 101 challenge
 
 ## 🗓️ Schedule
 - [X] Modify Vicuna input code considering left padding
-- [ ] Add multiple learning rate optimizer
+- [X] Add multiple learning rate optimizer
 - [ ] Add pipeline for submission format
-- [ ] Add function which create save folder when training
-- [ ] Save generation config
-- [ ] Add starter code inside this repo and make compatible with starter dataset/models
-- [ ] Check inference time (make under 5 minutes with 100 qa pairs)
+- [X] Add function which create save folder when training
+- [X] Save generation config
+- [X] Add starter code inside this repo and make compatible with starter dataset/models
+- [X] Check inference time (make under 5 minutes with 100 qa pairs)
 - [ ] Modify README for KT corp
 
 
