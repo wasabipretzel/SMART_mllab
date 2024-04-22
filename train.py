@@ -34,7 +34,7 @@ def train():
     mode = "train_eval"
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
-        
+
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     training_args=set_save_dir(model_args, data_args, training_args)
     set_seed(training_args.seed)
@@ -71,9 +71,8 @@ def train():
     else:
         embeddings= None
     metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"])
-
     trainer = get_trainer(model_args, training_args, model, metric, processor, data_module)
-    
+
     trainer.train()
     trainer.save_model(training_args.output_dir)
     trainer.save_state()

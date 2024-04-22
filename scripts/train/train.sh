@@ -36,12 +36,12 @@ python /SMART_mllab/train.py \
     --model_type instructblip_flant5 \
     --pretrained_model_path Salesforce/instructblip-flan-t5-xxl \
     --num_train_epochs 10 \
-    --per_device_train_batch_size 10 \
+    --per_device_train_batch_size 8 \
     --per_device_eval_batch_size 5 \
     --gradient_accumulation_steps 1 \
     --evaluation_strategy steps \
     --eval_steps 2 \
-    --save_strategy no \
+    --save_strategy steps \
     --save_steps 1 \
     --save_total_limit 20 \
     --pretrained_module_lr 1e-6 \

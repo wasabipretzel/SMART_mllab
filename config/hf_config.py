@@ -2,17 +2,19 @@
     source file for huggingface Argparser.
     Arguments classes must inherit dataclasses.
 """
+import copy
+
 from dataclasses import dataclass, field
 import transformers
 from transformers import TrainingArguments, PretrainedConfig, Seq2SeqTrainingArguments
-from typing import Dict, Optional, Sequence, List
+from typing import Dict, Optional, Sequence, List, Any
 from functools import partial
 
 
 @dataclass
 class ModelArguments(PretrainedConfig):
-    model_type: str=field(default="instructblip_vicuna") #["instructblip_vicuna", "instructblip_flant5", "R50_BERT"]
-    pretrained_model_path: str=field(default="Salesforce/instructblip-vicuna-7b") #can be switched with url or saved pretrained model path , "Salesforce/instructblip-flan-t5-xxl"
+    model_type: str=field(default=None)#["instructblip_vicuna", "instructblip_flant5", "R50_BERT"]
+    pretrained_model_path: str="Salesforce/instructblip-vicuna-7b"#can be switched with url or saved pretrained model path , "Salesforce/instructblip-flan-t5-xxl"
     freeze_llm: bool=True
     freeze_image_encoder: bool=True
     use_bf16: bool=True
@@ -21,6 +23,33 @@ class ModelArguments(PretrainedConfig):
     lora_alpha: int=32
     lora_dropout: float=0.05
     smart_starter_pretrained_path: str=field(default=None) 
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+            HF PretrainedConfig's to_dict() make class attribute "model_type" to ignore argparse's model_type.
+            (cause trouble when saving model and loading with config)
+        """
+        output = copy.deepcopy(self.__dict__)
+        for key, value in output.items():
+            # Deal with nested configs like CLIP
+            if isinstance(value, PretrainedConfig):
+                value = value.to_dict()
+                del value["transformers_version"]
+
+            output[key] = value
+
+        if hasattr(self, "quantization_config"):
+            output["quantization_config"] = (
+                self.quantization_config.to_dict()
+                if not isinstance(self.quantization_config, dict)
+                else self.quantization_config
+            )
+
+            # pop the `_pre_quantization_dtype` as torch.dtypes are not serializable.
+            _ = output.pop("_pre_quantization_dtype", None)
+        self.dict_torch_dtype_to_str(output)
+
+        return output
 
 @dataclass
 class DataArguments:

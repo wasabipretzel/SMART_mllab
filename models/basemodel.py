@@ -17,7 +17,6 @@ for handler in logger.handlers:
     handler.addFilter(NoWarningFilter()) #To avoid warning msg when generating (max_new_token), add custom filter
 
 class BaseModel(PreTrainedModel):
-
     def __init__(self, config):
         super().__init__(config)
         self.config = config
