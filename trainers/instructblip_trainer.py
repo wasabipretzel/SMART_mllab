@@ -2,6 +2,7 @@
     trainer for training instructblip base model. Specifically, purpose of this trainer is for applying 
     different learning rates for pretrained/scratch modules in model
 """
+from typing import Dict
 from transformers import Seq2SeqTrainer
 import torch 
 
@@ -43,3 +44,22 @@ class InstructblipTrainer(Seq2SeqTrainer):
 
 
         return self.optimizer
+
+
+    def log(self, logs:Dict[str, float]):
+        """
+            logs : {'loss': 4.2812, 'learning_rate': 7.042253521126761e-11}
+            -> learning_rate을 빼고 pretrained_lr, scratch_lr로 보고하도록..
+        """
+        if 'eval' in list(logs.keys())[0]:
+            super().log(logs)
+        else:
+            key_names = ["pretrained_lr", "scratch_lr"]
+            step = logs.get("step", 0)
+            if "learning_rate" in logs.keys():
+                del logs["learning_rate"]
+            lr_dict = {
+                f'{key_names[i]}': group['lr'] for i, group in enumerate(self.optimizer.param_groups)
+            }
+            logs.update(lr_dict)
+            super().log(logs)
