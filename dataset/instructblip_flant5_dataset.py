@@ -99,7 +99,7 @@ class InstructblipFlant5Dataset(Dataset):
 
     def get_input_text(self, qa_pair):
         #process input text -> this function can be developed for instruction tuning etc
-        if self.data_args.prediction_type == 'onlyanswer':
+        if self.data_args.prediction_type == 'answerkey':
             prompt = "Please read the following question, select the correct answer from one of the options.\n"
         elif self.data_args.prediction_type == 'answervalue':
             prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value.\n"
@@ -113,7 +113,7 @@ class InstructblipFlant5Dataset(Dataset):
     def get_output_text(self, qa_pair):
         # Answers can be modified with multi-hop reasoning process
         # answer_prefix = "Answer : "
-        if self.data_args.prediction_type == 'onlyanswer':
+        if self.data_args.prediction_type == 'answerkey':
             # one of 'A','B','C','D','E'
             answer = qa_pair["Answer"]
         elif self.data_args.prediction_type == 'answervalue':
@@ -219,8 +219,8 @@ class InstructblipFlant5_collator(object):
                 "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
                 "input_ids" : text_input.input_ids,
                 "attention_mask" : text_input.attention_mask,
-                "decoder_input_ids" : text_output.input_ids,
-                "decoder_attention_mask" : text_output.attention_mask,
+                "decoder_input_ids" : None,
+                "decoder_attention_mask" : None,
                 "labels" : targets,
             }
         else:
@@ -229,7 +229,7 @@ class InstructblipFlant5_collator(object):
                 "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
                 "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
                 # for generation, need different input_ids and att_mask
-                "input_ids" : text_input.input_ids,
+                "input_ids" : text_input.input_ids, #t5 encoder input
                 "attention_mask" : text_input.attention_mask,
                 "labels" : targets,
             } 

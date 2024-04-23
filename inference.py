@@ -78,7 +78,7 @@ def inference():
                     args=training_args,
                     compute_metrics=metric.compute_metrics,
                     data_collator = data_module["data_collator"],
-                    tokenizer=processor.tokenizer if model_args.model_type=="instructblip" else None,
+                    tokenizer=processor.tokenizer if "instructblip" in model_args.model_type else None,
                     )
 
 
