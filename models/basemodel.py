@@ -20,7 +20,7 @@ class BaseModel(PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.config = config
-        self.VLM = InstructBlipForConditionalGeneration.from_pretrained(config.pretrained_model_path)
+        self.VLM = InstructBlipForConditionalGeneration.from_pretrained(config.pretrained_model_path, config.image_size, config.s2wrapper, ignore_mismatched_sizes=True) # add s2wrapper
         if config.model_type=="instructblip_vicuna":
             self.VLM.language_model.generation_config.eos_token_id=2
             self.VLM.generation_config.eos_token_id=2

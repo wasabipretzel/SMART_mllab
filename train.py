@@ -23,7 +23,6 @@ from trainers.build_trainer import get_trainer
 from dataset.build_dataset import get_dataset
 from utils.util import count_parameters, NoWarningFilter, set_save_dir
 
-
 local_rank = None
 logger = logging.get_logger("transformers")
 for handler in logger.handlers:
@@ -36,6 +35,7 @@ def train():
         (ModelArguments, DataArguments, TrainingArguments))
 
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+
     training_args=set_save_dir(model_args, data_args, training_args)
     set_seed(training_args.seed)
 

@@ -23,6 +23,9 @@ class ModelArguments(PretrainedConfig):
     lora_alpha: int=32
     lora_dropout: float=0.05
     smart_starter_pretrained_path: str=field(default=None) 
+    image_size: int=224
+    s2wrapper: bool=False
+    image_encoder: str=field(default='vit') # ['vit', 'swin']
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -54,12 +57,12 @@ class ModelArguments(PretrainedConfig):
 @dataclass
 class DataArguments:
     split_type: str="PS"
-    split_path: str="/data/split"
-    data_path: str="/data/SMART101-release-v1/SMART101-Data"
-    puzzle_path: str="/data/SMART101-release-v1/puzzle_type_info.csv"
+    split_path: str="/home/work/g-earth-22/VLM/VLM/database/SMART-101/data/split"
+    data_path: str="/home/work/g-earth-22/VLM/VLM/database/SMART-101/data/SMART101-release-v1/SMART101-Data"
+    puzzle_path: str="/home/work/g-earth-22/VLM/VLM/database/SMART-101/data/SMART101-release-v1/puzzle_type_info.csv"
     # num_class: int=91
     prediction_type: str=field(default="answerkey") #could be ["answerkey","answervalue"]. answerkey predict one of 'A','B','C','D','E'. answervalue predict float/str value
-   
+    data_image_size: int=224
 
 
 @dataclass

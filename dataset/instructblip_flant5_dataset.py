@@ -93,7 +93,7 @@ class InstructblipFlant5Dataset(Dataset):
             'puzzle_id': '19', 'AnswerValue': 10}
         """
         image_path = os.path.join(self.data_args.data_path, qa_pair["puzzle_id"], "img", qa_pair["image"])
-        image = Image.open(image_path).convert("RGB")
+        image = Image.open(image_path).resize((self.data_args.data_image_size, self.data_args.data_image_size)).convert("RGB")
 
         return image
 

@@ -42,6 +42,9 @@ from transformers.utils import (
 from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM
 from .configuration_instructblip import InstructBlipConfig, InstructBlipQFormerConfig, InstructBlipVisionConfig
 
+from scaling_on_scales.s2wrapper import forward as multiscale_forward
+
+from transformers import Swinv2Config, Swinv2Model
 
 logger = logging.get_logger(__name__)
 
@@ -87,8 +90,12 @@ class InstructBlipForConditionalGenerationModelOutput(ModelOutput):
 
 # Copied from transformers.models.blip.modeling_blip.BlipVisionEmbeddings with Blip->InstructBlip
 class InstructBlipVisionEmbeddings(nn.Module):
-    def __init__(self, config: InstructBlipVisionConfig):
+    def __init__(self, config: InstructBlipVisionConfig, image_size: int = 224, s2wrapper: bool = False):
         super().__init__()
+        config.image_size = image_size
+        # if s2wrapper:
+        #     config.hidden_size = config.hidden_size*2
+
         self.config = config
         self.embed_dim = config.hidden_size
         self.image_size = config.image_size
@@ -489,12 +496,13 @@ class InstructBlipVisionModel(InstructBlipPreTrainedModel):
     main_input_name = "pixel_values"
     config_class = InstructBlipVisionConfig
 
-    def __init__(self, config: InstructBlipVisionConfig):
+    def __init__(self, config: InstructBlipVisionConfig, image_size: int = 224, s2wrapper: bool = False):
         super().__init__(config)
+        config.image_size = image_size
         self.config = config
         embed_dim = config.hidden_size
 
-        self.embeddings = InstructBlipVisionEmbeddings(config)
+        self.embeddings = InstructBlipVisionEmbeddings(config, image_size, s2wrapper)
         self.encoder = InstructBlipEncoder(config)
         self.post_layernorm = nn.LayerNorm(embed_dim, eps=config.layer_norm_eps)
 
@@ -566,6 +574,12 @@ class InstructBlipQFormerMultiHeadAttention(nn.Module):
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
         self.query = nn.Linear(config.hidden_size, self.all_head_size)
+        # print('config.encoder_hidden_size', config.encoder_hidden_size)
+        # print('all_head_size', self.all_head_size)
+        # print('is_cross_attention', is_cross_attention)
+        # print('config.encoder_hidden_size', config.encoder_hidden_size)
+        # print('all_head_size', self.all_head_size)
+        # print('config.hidden_size', config.hidden_size)
         if is_cross_attention:
             self.key = nn.Linear(config.encoder_hidden_size, self.all_head_size)
             self.value = nn.Linear(config.encoder_hidden_size, self.all_head_size)
@@ -613,6 +627,7 @@ class InstructBlipQFormerMultiHeadAttention(nn.Module):
         is_cross_attention = encoder_hidden_states is not None
 
         if is_cross_attention:
+            # print('encoder_hidden_states', encoder_hidden_states.shape)
             key_layer = self.transpose_for_scores(self.key(encoder_hidden_states))
             value_layer = self.transpose_for_scores(self.value(encoder_hidden_states))
             attention_mask = encoder_attention_mask
@@ -1036,8 +1051,11 @@ class InstructBlipQFormerModel(InstructBlipPreTrainedModel):
     instruction as input.
     """
 
-    def __init__(self, config: InstructBlipQFormerConfig):
+    def __init__(self, config: InstructBlipQFormerConfig, s2wrapper: bool = False):
         super().__init__(config)
+        # if s2wrapper:
+        #     config.hidden_size = config.hidden_size*2
+
         self.config = config
 
         self.embeddings = InstructBlipQFormerEmbeddings(config)
@@ -1240,13 +1258,22 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
     config_class = InstructBlipConfig
     main_input_name = "pixel_values"
 
-    def __init__(self, config: InstructBlipConfig):
+    def __init__(self, config: InstructBlipConfig, image_size: int = 224, s2wrapper: bool = False, vision_encoder: str = 'vit'):
         super().__init__(config)
+        if s2wrapper:
+            config.qformer_config.encoder_hidden_size = config.qformer_config.encoder_hidden_size*2
+            # config.vision_config.hidden_size = config.vision_config.hidden_size * 2
 
-        self.vision_model = InstructBlipVisionModel(config.vision_config)
+        if vision_encoder == 'vit':
+            self.vision_model = InstructBlipVisionModel(config.vision_config, image_size, s2wrapper)
+        elif vision_encoder == 'swin':
+            config.vision_config = Swinv2Config()
+            self.vision_model = Swinv2Model(config.vision_config)
+
+        self.s2wrapper = s2wrapper
 
         self.query_tokens = nn.Parameter(torch.zeros(1, config.num_query_tokens, config.qformer_config.hidden_size))
-        self.qformer = InstructBlipQFormerModel(config.qformer_config)
+        self.qformer = InstructBlipQFormerModel(config.qformer_config, s2wrapper)
 
         self.language_projection = nn.Linear(config.qformer_config.hidden_size, config.text_config.hidden_size)
 
@@ -1373,13 +1400,26 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         
         # step 1: forward the images through the vision encoder,
         # to get image embeddings of shape (batch_size, seq_len, hidden_size)
+        # add s2wrapper
         vision_outputs = self.vision_model(
-            pixel_values=pixel_values,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
+                pixel_values=pixel_values,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
         )
-        image_embeds = vision_outputs[0]
+
+        def forward_vision_outputs(pixel_values):
+            return self.vision_model(
+                pixel_values=pixel_values
+            )[0]
+
+        if self.s2wrapper:
+            image_embeds = multiscale_forward(forward_vision_outputs, pixel_values, scales = [1, 2], num_prefix_token = 1)
+
+        else:
+            image_embeds = vision_outputs[0]
+
+        # print('image_emebeds', image_embeds.shape)
 
         # step 2: forward the query tokens through the QFormer, using the image embeddings for cross-attention
         image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
@@ -1497,8 +1537,18 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             self._preprocess_accelerate()
 
         batch_size = pixel_values.shape[0]
-        image_embeds = self.vision_model(pixel_values, return_dict=True).last_hidden_state
 
+        def forward_vision_outputs(pixel_values):
+            return self.vision_model(
+                pixel_values=pixel_values
+            ).last_hidden_state
+
+        if self.s2wrapper:
+            image_embeds = multiscale_forward(forward_vision_outputs, pixel_values, scales = [1, 2], num_prefix_token = 1)
+
+        else:
+            image_embeds = self.vision_model(pixel_values, return_dict=True).last_hidden_state
+            
         image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
 
         query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
