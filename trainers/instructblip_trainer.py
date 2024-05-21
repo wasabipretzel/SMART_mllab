@@ -22,7 +22,7 @@ class InstructblipTrainer(Seq2SeqTrainer):
         """ 
         opt_model = self.model
         pretrained_modules = ["qformer", "language_projection"]
-        scratch_modules = ["lora"]
+        scratch_modules = ["lora", "sam_linear", "category_cls_head"]
 
         if self.args.pretrained_module_lr is not None and self.args.scratch_module_lr is not None: 
             pretrained_parameters, scratch_parameters= list(), list()
@@ -38,6 +38,7 @@ class InstructblipTrainer(Seq2SeqTrainer):
                 {'params': pretrained_parameters, 'lr': self.args.pretrained_module_lr},
                 {'params': scratch_parameters, 'lr': self.args.scratch_module_lr}
             ]
+
         optimizer_cls, optimizer_kwargs = Seq2SeqTrainer.get_optimizer_cls_and_kwargs(self.args)
 
         self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)

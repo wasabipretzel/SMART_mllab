@@ -58,14 +58,28 @@ class BaseModel(PreTrainedModel):
                 raise NotImplementedError
 
             self.VLM.language_model = get_peft_model(self.VLM.language_model, lora_config)
+    
+
+        # Linear map for SAM feature 
+        if self.config.use_SAM:
+            self.sam_linear = nn.Linear(self.config.sam_feat_dim, self.VLM.config.vision_config.hidden_size) #1280, 1408
+            if config.use_bf16:
+                self.sam_linear.to(torch.bfloat16)
+        
+
 
     def forward(self, return_loss=True, **sample):
+        if self.config.use_SAM:
+            if self.config.use_bf16:
+                sample["sam_feature"] = sample["sam_feature"].to(torch.bfloat16)
+            sample["sam_feature"] = self.sam_linear(sample["sam_feature"]) #[B, 256, 1408]
+        if self.config.white_image_crossattention == False:
+            sample["white_image_crossattention"] = False
+        if self.config.use_onlySAM:
+            sample["use_onlySAM"] = True
         result = self.VLM(
             **sample
         ) #['loss', 'logits', 'vision_outputs', 'qformer_outputs', 'language_model_outputs']
-
-        #language_model_outputs.logits.shape -> [B, S, vocab]
-        # logits은 language_model_outputs.logits과 동일함 
         
         output = {
             "loss" : result.loss,
@@ -76,11 +90,18 @@ class BaseModel(PreTrainedModel):
 
     @torch.no_grad()
     def generate(self, **sample):
-
+        if self.config.use_SAM:
+            if self.config.use_bf16:
+                sample["sam_feature"] = sample["sam_feature"].to(torch.bfloat16)
+            sample["sam_feature"] = self.sam_linear(sample["sam_feature"]) #[B, 256, 1408]
+        if self.config.white_image_crossattention == False:
+            sample["white_image_crossattention"] = False
+        if self.config.use_onlySAM:
+            sample["use_onlySAM"] = True
         result = self.VLM.generate(
             **sample,
             #generation_kwargs : if no parameters, -> greedy search
-            max_new_tokens=2
+            # max_new_tokens=2
             # max_length = self.generation_config.max_length
         )
 

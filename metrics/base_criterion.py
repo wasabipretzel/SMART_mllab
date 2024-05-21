@@ -71,14 +71,12 @@ class ComputeMetricAnswerKey:
 
         pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
         pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
-
-
-        
         #위의 값들이 detach되어있는지 확인할 것
         # tokenizing 시 맨 앞 bos token안붙히게 할 것
         self.tokenizer.add_bos_token=False
         non_approximated_pred = []
         approximated_pred = [] # List[bool] : len=num test samples (근사하고 맞았는지 틀렸는지)
+        print(f"pred answer list : {len(pred_answer_list)}")
         for idx, each_pred in enumerate(pred_answer_list):
             each_pred = str(each_pred).strip() #생성 답에 '4\n'이런게 있음 
             gt_answer = gt_answer_list[idx]
@@ -108,7 +106,7 @@ class ComputeMetricAnswerKey:
 
         
         assert len(approximated_pred) == len(pred_answer_list) == pred.predictions.shape[0]
-
+        print(f"non approximated pred : {len(non_approximated_pred)}")
         #calculate s_acc/o_acc & puzzle_id 
         tot_samples_num = pred.predictions.shape[0]
         puzzle_acc = {}
@@ -187,7 +185,7 @@ class ComputeMetricAnswerValue:
             b_options.append(data["option_values"])
             b_answer_type.append(data["answer_type"])
             b_pids.append(data["pid"])
-        
+
         self.b_options = b_options
         self.b_answer_type = b_answer_type
         self.b_pids = b_pids
@@ -226,7 +224,7 @@ class ComputeMetricAnswerValue:
 
         pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
         pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
-
+        
         #위의 값들이 detach되어있는지 확인할 것
         # tokenizing 시 맨 앞 bos token안붙히게 할 것
         self.tokenizer.add_bos_token=False

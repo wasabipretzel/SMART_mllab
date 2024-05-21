@@ -1,6 +1,7 @@
 import os
 import math
 import pickle as pkl
+import json
 
 from PIL import Image
 import torch
@@ -27,6 +28,12 @@ class InstructblipFlant5Dataset(Dataset):
         self.qa_info = self.get_qainfo()
         self.generate_option_key()
         self.append_prediction_type() #use for option approximation when prediction type is 'answervalue'
+
+        if self.data_args.use_caption:
+            self.caption_info = self.load_extracted_caption()
+        
+        if self.data_args.category_classification_mapping_path != None:
+            self.puzzle_2_category = self.load_category_mapping()
         """
             single instance example of self.qa_info
 
@@ -38,6 +45,23 @@ class InstructblipFlant5Dataset(Dataset):
             'puzzle_id': '19', 'AnswerValue': 10}
         """
 
+    def load_category_mapping(self):
+        """
+            {   "puzzle_id (str) " : category num (0~7)
+                "1" : 0,
+                "2" : 3,
+                ..
+            }
+        """
+        with open(self.data_args.category_classification_mapping_path, 'r') as f:
+            puzzle_id_2_category_num = json.load(f)
+        return puzzle_id_2_category_num
+
+    def load_extracted_caption(self):
+        with open(self.data_args.caption_path, 'r') as f:
+            extracted_caption = json.load(f)
+        return extracted_caption
+    
     def generate_option_key(self):
         """_summary_
             given self.qa_info, create option key and value for input text prompt
@@ -108,7 +132,20 @@ class InstructblipFlant5Dataset(Dataset):
 
         question = "Question : " + qa_pair["Question"] + '\n' + 'Options : ' + qa_pair["options"] + "\n" + "Answer : "
 
-        return prompt + question
+        if self.data_args.use_caption:
+            image_name = qa_pair["image"]
+            caption_value = self.caption_info[image_name]["caption"]
+            # if len(caption_value.split()) <= self.caption_threshold:
+            #     caption = "Caption : " + caption_value+'\n'
+            # else:
+            #     caption_value = " ".join(caption_value.split()[:self.caption_threshold])
+            #     caption = "Caption : " + caption_value+'\n'
+            caption = "Caption : " + caption_value+'\n'
+            input_text= prompt + caption + question
+        else:
+            input_text = prompt + question # cdddddaptddddddddionddddd
+
+        return input_text
 
     def get_output_text(self, qa_pair):
         # Answers can be modified with multi-hop reasoning process
@@ -145,6 +182,49 @@ class InstructblipFlant5Dataset(Dataset):
                 option_values.append(qa_pair[option_key])
         return option_values
 
+    def get_sam_feature(self, qa_pair):
+        """
+            given single qa pair, load pre-extracted sam feature
+            sam encoder feature : [256, 1280] (vit-h)
+        """
+        image_name = qa_pair["image"].split('.png')[0]
+        single_sam_feat_path = os.path.join(self.data_args.sam_feature_path, image_name+'.npy')
+        try:
+            sam_feat = torch.tensor(np.load(single_sam_feat_path))
+        except:
+            print(f"{image_name}")
+        return sam_feat
+    
+    def check_white(self, qa_pair):
+        image_path = os.path.join(self.data_args.data_path, qa_pair["puzzle_id"], "img", qa_pair["image"])
+        low, high = Image.open(image_path).convert("L").getextrema() #range of image value
+        if low == high == 255:
+            return True
+        else:
+            return False
+    
+    def get_token_mask(self, qa_pair):
+        feature_path = os.path.join(self.data_args.token_mask_path, qa_pair["image"]+'.npy')
+
+        #만약 이 feature path에 존재하지 않으면 SAM mask가 뽑히지 않았거나 완전 흰색이거나...-> 그냥 전부 attend하게끔 함
+        if not os.path.isfile(feature_path):
+            token_mask = torch.ones([257]).long()
+        else:
+            token_mask = torch.tensor(np.load(feature_path)).unsqueeze(0).long() #[1, 224, 224]
+            token_mask = F.avg_pool2d(token_mask, kernel_size=14, stride=14).squeeze(0) #[16, 16]
+            token_mask = (token_mask != 0).long()
+            token_mask = token_mask.reshape(-1) #[256]
+            token_mask = torch.cat([torch.ones([1]), token_mask])
+        
+        return token_mask #[257]
+
+    def get_category_num(self, qa_pair):
+        image_name = qa_pair["image"]  # 'puzzle_19_e_1.png', 
+        puzzle_id = qa_pair["puzzle_id"]
+        category_num = self.puzzle_2_category[puzzle_id]
+
+        return category_num #NOTE need to check dtype
+
     def __len__(self):
         return len(self.qa_info)
         
@@ -155,6 +235,19 @@ class InstructblipFlant5Dataset(Dataset):
         text_output = self.get_output_text(single_qa_pair) 
         pid = int(single_qa_pair["puzzle_id"])
         option_values = self.get_option_values(single_qa_pair)
+
+        # for sam feature
+        if self.data_args.sam_feature_path != None:
+            sam_feature = self.get_sam_feature(single_qa_pair)
+        else:
+            sam_feature = None
+
+        if self.data_args.SAM_token_mask:
+            image_attention_mask = self.get_token_mask(single_qa_pair)
+        
+        if self.data_args.category_classification_mapping_path != None:
+            gt_category_num = self.get_category_num(single_qa_pair)
+        
         data = {
             'pixel_values' : image,
             # llm input
@@ -169,7 +262,17 @@ class InstructblipFlant5Dataset(Dataset):
             # for evaluation
             'pid' : pid,
             'option_values' : option_values,
-            'answer_type' : single_qa_pair["answer_type"]
+            'answer_type' : single_qa_pair["answer_type"],
+
+            # for SAM feature experiment
+            'sam_feature' : sam_feature,
+
+            # for white background exclude
+            'is_only_white' : self.check_white(single_qa_pair), #bool
+            "image_attention_mask" : image_attention_mask if self.data_args.SAM_token_mask else None,
+            
+            # for additional category loss
+            "category_num" : gt_category_num if self.data_args.category_classification_mapping_path != None else None
         }
 
         return data
@@ -181,6 +284,7 @@ class InstructblipFlant5_collator(object):
         flant5의 경우, input : text, output : text + eos token만 붙히면 나머지는 t5안에서 처리를 해준다. 
         flant5은 right padding이 기본
     """
+    data_args:transformers.PretrainedConfig
     processor:transformers.ProcessorMixin
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
@@ -188,15 +292,28 @@ class InstructblipFlant5_collator(object):
         b_text_input = []
         b_text_output = []
         b_qformer_text_input = []
+        b_sam_feature = []
+        white_image_index = []
+        token_mask_image_attention = [] if self.data_args.SAM_token_mask else None
+        b_category_gt_num = [] if self.data_args.category_classification_mapping_path != None else None
         mode = instances[0]["mode"]
 
-        for each_batch in instances:
+        for idx, each_batch in enumerate(instances):
             #qformer input
             b_pixel_values.append(each_batch["pixel_values"]) 
             b_qformer_text_input.append(each_batch["question"])
             #llm I/O
             b_text_input.append(each_batch["text_input"])
             b_text_output.append(each_batch["text_output"])
+            #sam feature
+            b_sam_feature.append(each_batch["sam_feature"])
+            if each_batch["is_only_white"]:
+                white_image_index.append(idx)
+            if self.data_args.SAM_token_mask:
+                token_mask_image_attention.append(each_batch["image_attention_mask"])
+            if self.data_args.category_classification_mapping_path != None:
+                b_category_gt_num.append(each_batch["category_num"])
+
 
         #qformer input
         image_input = self.processor(images=b_pixel_values, return_tensors='pt')
@@ -212,6 +329,12 @@ class InstructblipFlant5_collator(object):
         targets = text_output.input_ids.masked_fill(
             text_output.input_ids == self.processor.tokenizer.pad_token_id, -100 
         )
+
+        #sam feature
+        b_sam_feature = torch.stack(b_sam_feature, dim=0) if b_sam_feature[0] != None else None
+        if self.data_args.SAM_token_mask:
+            token_mask_image_attention = torch.stack(token_mask_image_attention, dim=0)
+
         if mode == "train":
             inputs = {
                 "pixel_values" : image_input.pixel_values,
@@ -222,6 +345,11 @@ class InstructblipFlant5_collator(object):
                 "decoder_input_ids" : None,
                 "decoder_attention_mask" : None,
                 "labels" : targets,
+                #for sam experiment
+                "sam_feature" : b_sam_feature, # if sam feature is used, torch.tensor, else None -> need to used at modeling_instructblip.py
+                "white_image_index" : white_image_index,
+                "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else None,
+                "category_gt" : torch.tensor(b_category_gt_num) if b_category_gt_num != None else None 
             }
         else:
             inputs = {
@@ -232,6 +360,10 @@ class InstructblipFlant5_collator(object):
                 "input_ids" : text_input.input_ids, #t5 encoder input
                 "attention_mask" : text_input.attention_mask,
                 "labels" : targets,
+                #for sam experiment
+                "sam_feature" : b_sam_feature,
+                "white_image_index" : white_image_index,
+                "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else None,
             } 
         
         return inputs

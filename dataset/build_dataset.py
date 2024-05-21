@@ -15,8 +15,8 @@ def get_dataset(model_args, data_args, mode, processor=None)-> Dict:
                 data_collator = InstructblipVicuna_collator(processor=processor) 
             elif 'flant5' in model_args.model_type:
                 train_dataset = InstructblipFlant5Dataset(data_args=data_args, mode='train')
-                val_dataset =  InstructblipFlant5Dataset(data_args=data_args, mode='val')
-                data_collator = InstructblipFlant5_collator(processor=processor) 
+                val_dataset =  InstructblipFlant5Dataset(data_args=data_args, mode='test')
+                data_collator = InstructblipFlant5_collator(data_args = data_args, processor=processor) 
             else:
                 raise NotImplementedError
         else:
@@ -26,7 +26,7 @@ def get_dataset(model_args, data_args, mode, processor=None)-> Dict:
                 data_collator = InstructblipVicuna_collator(processor=processor) 
             elif 'flant5' in model_args.model_type:
                 val_dataset =  InstructblipFlant5Dataset(data_args=data_args, mode='test')
-                data_collator = InstructblipFlant5_collator(processor=processor) 
+                data_collator = InstructblipFlant5_collator(data_args = data_args, processor=processor) 
             else:
                 raise NotImplementedError
     elif model_args.model_type=="R50_BERT":

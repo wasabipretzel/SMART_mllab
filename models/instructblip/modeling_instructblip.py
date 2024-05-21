@@ -1226,6 +1226,24 @@ class InstructBlipQFormerModel(InstructBlipPreTrainedModel):
         )
 
 
+class CategoryClassfier(nn.Module):
+    def __init__(self, input_size, output_size, hidden_sizes=[128, 32]):
+        super(CategoryClassfier, self).__init__()
+        # Create a list of all sizes which includes input, hidden, and output layers
+        sizes = [input_size] + hidden_sizes + [output_size]
+        # List comprehension to create layers based on sizes
+        self.layers = nn.ModuleList([nn.Linear(sizes[i], sizes[i+1]) for i in range(len(sizes) - 1)])
+        self.activation = nn.ReLU()  # You can change the activation function here
+
+    def forward(self, x):
+        for i in range(len(self.layers) - 1):
+            x = self.layers[i](x)
+            x = self.activation(x)
+        # Output layer without activation function
+        x = self.layers[-1](x)
+        return x
+
+
 @add_start_docstrings(
     """
     InstructBLIP Model for generating text given an image and an optional text prompt. The model consists of a vision
@@ -1262,6 +1280,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             self._keep_in_fp32_modules.extend(language_model._keep_in_fp32_modules)
 
         self.language_model = language_model
+        self.category_cls_head = CategoryClassfier(input_size=self.qformer.config.hidden_size, output_size=8)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1326,6 +1345,13 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         labels: Optional[torch.LongTensor] = None,
         return_dict: Optional[bool] = None,
+        #for sam feature input
+        sam_feature: Optional[torch.FloatTensor] = None,
+        white_image_index: Optional[list] = None,
+        white_image_crossattention: Optional[bool] = True,
+        use_onlySAM: Optional[bool] = False,
+        image_attention_mask: Optional[torch.LongTensor] = None,
+        category_gt: Optional[torch.tensor] = None,
     ) -> Union[Tuple, InstructBlipForConditionalGenerationModelOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
@@ -1379,10 +1405,20 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        image_embeds = vision_outputs[0]
+        image_embeds = vision_outputs[0] #NOTE shape? #[B, tokens(257), dim (1408)]
+        if sam_feature != None:
+            if use_onlySAM:
+                image_embeds = sam_feature # [B, 256, 1408] #SAM feature만 사용한다. 
+            else:
+                image_embeds = torch.cat([image_embeds, sam_feature], dim=1) #[B, 257+256, dim(1408)]
 
         # step 2: forward the query tokens through the QFormer, using the image embeddings for cross-attention
-        image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
+        if image_attention_mask is None:
+            image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
+
+        if white_image_crossattention == False and sam_feature == None:
+            if len(white_image_index) != 0:
+                image_attention_mask[white_image_index] = 0 # mask out white image when cross attention
 
         # difference with BLIP-2 here: we also feed the instruction prompt to the Q-Former
         query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
@@ -1402,12 +1438,17 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         )
         query_output = query_outputs[0][:, : query_tokens.size(1), :]
 
+        # add additional loss
+        cls_loss = None
+        if category_gt != None:
+            category_hidden_state = self.category_cls_head(torch.mean(query_output, dim=1)) #[B, 8]
+            cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
+            cls_loss = cls_loss_criterion(category_hidden_state, category_gt)
         # step 3: use the language model, conditioned on the query outputs and the prompt
         language_model_inputs = self.language_projection(query_output)
         language_model_attention_mask = torch.ones(
             language_model_inputs.size()[:-1], dtype=torch.long, device=language_model_inputs.device
         )
-
         inputs_embeds = self.language_model.get_input_embeddings()(input_ids)
 
         inputs_embeds = torch.cat([language_model_inputs, inputs_embeds.to(language_model_inputs.device)], dim=1)
@@ -1450,6 +1491,8 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                 labels=labels,
             )
             loss = outputs.loss if return_dict else outputs[0]
+            if cls_loss != None:
+                loss += cls_loss
             logits = outputs.logits if return_dict else outputs[1]
 
         if not return_dict:
@@ -1472,6 +1515,12 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         qformer_attention_mask: Optional[torch.LongTensor] = None,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.LongTensor] = None,
+        #for sam feature
+        sam_feature: Optional[torch.FloatTensor] = None,
+        white_image_index: Optional[list] = None,
+        white_image_crossattention: Optional[bool] = True,
+        use_onlySAM: Optional[bool] = False,
+        image_attention_mask: Optional[torch.LongTensor] = None,
         **generate_kwargs,
     ) -> torch.LongTensor:
         """
@@ -1498,8 +1547,18 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
 
         batch_size = pixel_values.shape[0]
         image_embeds = self.vision_model(pixel_values, return_dict=True).last_hidden_state
+        if sam_feature != None:
+            if use_onlySAM:
+                image_embeds = sam_feature # [B, 256, 1408] #SAM feature만 사용한다. 
+            else:
+                image_embeds = torch.cat([image_embeds, sam_feature], dim=1) #[B, 257+256, dim(1408)]
 
-        image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
+        if image_attention_mask is None:
+            image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
+
+        if white_image_crossattention == False and sam_feature == None: #SAM feature쓸 때는 white image crossattention비활성화
+            if len(white_image_index) != 0:
+                image_attention_mask[white_image_index] = 0 #mask out white images when cross attention to qformer
 
         query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
         query_attention_mask = torch.ones(query_tokens.size()[:-1], dtype=torch.long, device=image_embeds.device)
