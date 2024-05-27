@@ -6,7 +6,7 @@ python /SMART_mllab/submission.py \
     --pretrained_model_path Salesforce/instructblip-flan-t5-xl \
     --prediction_type answerkey \
     --challenge_phase val \
-    --load_ckpt_path /data/ckpt/instructblip_flant5/answerkey/instructblip_flant5_xl_base/checkpoint-6000 \
+    --load_ckpt_path /submission_ckpt_dir/checkpoint-6000 \
     --per_device_eval_batch_size 10 \
     --do_predict True \
     --dataloader_num_workers 4 \
