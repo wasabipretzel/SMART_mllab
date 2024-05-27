@@ -27,11 +27,13 @@ def get_model(model_args, training_args):
     """
     if "instructblip" in model_args.model_type:
         if training_args.load_ckpt_path == None:
+            model_args.train_mode=True
             processor = InstructBlipProcessor.from_pretrained(model_args.pretrained_model_path)
             model = BaseModel(model_args).to(training_args.device)
         else:
             processor = InstructBlipProcessor.from_pretrained(model_args.pretrained_model_path)
             model_config = PretrainedConfig.from_pretrained(training_args.load_ckpt_path)
+            model_config.train_mode=False
             model = BaseModel.from_pretrained(pretrained_model_name_or_path=training_args.load_ckpt_path,
                                             config=model_config
                                             ).to(training_args.device)
