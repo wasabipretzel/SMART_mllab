@@ -86,6 +86,9 @@ class DataArguments:
     # category_classification_mapping_path = "/data/category_mapping/puzzle_2_categorynum_mapping.json"
     category_classification_mapping_path: str=field(default=None)
 
+    #for submission
+    challenge_phase: str=field(default=None)
+
 
 @dataclass
 class TrainingArguments(Seq2SeqTrainingArguments):
