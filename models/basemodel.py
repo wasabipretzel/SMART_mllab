@@ -9,6 +9,8 @@ from typing import Dict, Optional, Sequence, List
 from peft import LoraConfig, get_peft_model
 
 from models.instructblip.modeling_instructblip import InstructBlipForConditionalGeneration
+from models.instructblip.configuration_instructblip import InstructBlipConfig
+
 from utils.util import NoWarningFilter
 
 logger = logging.get_logger('transformers')
