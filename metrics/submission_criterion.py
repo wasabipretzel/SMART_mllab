@@ -48,7 +48,6 @@ class SubmissionCriterionAnswerKey:
         }
         # self.candidates = ["A","B","C","D","E"]
         self.cossim = CosineSimilarity(dim=1)
-        self.puzzles = read_dataset_info(self.puzzle_path) #TODO remove hard coding
     # method
     # 1. pred 같이 밀어올리는 부분은 self.qa_info의 answer type, options(option들의 값), pids 
     # 2. pred.predictions을 pad_token_id제외하고 batch_decode
@@ -152,7 +151,6 @@ class SubmissionCriterionAnswerValue:
         """
         self.candidates = ["A","B","C","D","E"]
         self.cossim = CosineSimilarity(dim=1)
-        self.puzzles = read_dataset_info(self.puzzle_path) #TODO remove hard coding
     # method
     # 1. pred 같이 밀어올리는 부분은 self.qa_info의 answer type, options(option들의 값), pids 
     # 2. pred.predictions을 pad_token_id제외하고 batch_decode
