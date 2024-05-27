@@ -20,7 +20,12 @@ class BaseModel(PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.config = config
-        self.VLM = InstructBlipForConditionalGeneration.from_pretrained(config.pretrained_model_path)
+        if self.config.train_mode == True:
+            self.VLM = InstructBlipForConditionalGeneration.from_pretrained(config.pretrained_model_path)
+        else:
+            model_name = self.config.pretrained_model_path.split("/")[-1]
+            self.vlm_config=InstructBlipConfig.from_pretrained(f"/SMART_mllab/models/instructblip/{model_name}.json")
+            self.VLM = InstructBlipForConditionalGeneration(self.vlm_config)
         if config.model_type=="instructblip_vicuna":
             self.VLM.language_model.generation_config.eos_token_id=2
             self.VLM.generation_config.eos_token_id=2

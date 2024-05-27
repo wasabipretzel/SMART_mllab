@@ -103,7 +103,7 @@ class TrainingArguments(Seq2SeqTrainingArguments):
     load_ckpt_path: str=field(default=None)
     seed: int=42
     should_log: bool=True
-    ddp_find_unused_parameters: bool=False
+    ddp_find_unused_parameters: bool=True
     pretrained_module_lr: float=field(default=1e-6) #learning rate for pretrained moduel
     scratch_module_lr: float=field(default=1e-4) #learning rate for modules which are trained from scratch
     #generation arguments in trainer evaluate()
