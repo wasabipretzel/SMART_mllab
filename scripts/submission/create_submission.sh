@@ -1,5 +1,5 @@
 
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 python /SMART_mllab/submission.py \
     --output_dir /data/ckpt \
     --model_type instructblip_flant5 \
