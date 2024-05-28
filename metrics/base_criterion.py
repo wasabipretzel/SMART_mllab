@@ -109,6 +109,7 @@ class ComputeMetricAnswerKey:
         print(f"non approximated pred : {len(non_approximated_pred)}")
         #calculate s_acc/o_acc & puzzle_id 
         tot_samples_num = pred.predictions.shape[0]
+
         puzzle_acc = {}
         for t in list(set(self.b_pids)):
             puzzle_acc[str(t)] = [

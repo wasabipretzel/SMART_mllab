@@ -18,6 +18,7 @@ Processor class for InstructBLIP. Largely copy of Blip2Processor with addition o
 
 import os
 from typing import List, Optional, Union
+import numpy as np
 
 from transformers.image_processing_utils import BatchFeature
 from transformers.image_utils import ImageInput
@@ -131,6 +132,9 @@ class InstructBlipProcessor(ProcessorMixin):
             encoding.update(image_encoding)
 
         return encoding
+
+
+
 
     # Copied from transformers.models.blip.processing_blip.BlipProcessor.batch_decode with BertTokenizerFast->PreTrainedTokenizer
     def batch_decode(self, *args, **kwargs):

@@ -29,6 +29,7 @@ from transformers.modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
     BaseModelOutputWithPooling,
     BaseModelOutputWithPoolingAndCrossAttentions,
+    Seq2SeqLMOutput
 )
 from transformers.modeling_utils import PreTrainedModel
 from transformers.pytorch_utils import apply_chunking_to_forward, find_pruneable_heads_and_indices, prune_linear_layer
@@ -1284,6 +1285,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
 
         # Initialize weights and apply final processing
         self.post_init()
+    
 
     def get_input_embeddings(self):
         return self.language_model.get_input_embeddings()
@@ -1327,6 +1329,50 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
 
         if hasattr(self.language_model, "_hf_hook"):
             self.language_model._hf_hook.io_same_device = True  # For `generate` compatibility
+
+
+    def pad_and_concat(self, nonwhite_tensor, white_tensor, padding_dim=1, device=None):
+        if device is None:
+            device = nonwhite_tensor.device
+        nonwhite_tensor = nonwhite_tensor.to(device)
+        white_tensor = white_tensor.to(device)
+
+        max_size = max(nonwhite_tensor.size(padding_dim), white_tensor.size(padding_dim))
+
+        if nonwhite_tensor.size(padding_dim) < max_size:
+            padding_size = max_size - nonwhite_tensor.size(padding_dim)
+            padding = [0] * (2 * nonwhite_tensor.ndim)
+            if nonwhite_tensor.ndim % 2 == 0:
+                padding[padding_dim] = padding_size
+            else:
+                padding[2 * padding_dim] = padding_size // 2
+                padding[2 * padding_dim + 1] = padding_size - (padding_size // 2)
+            nonwhite_padded_tensor = nn.functional.pad(nonwhite_tensor, padding, mode='constant', value=0)
+        else:
+            nonwhite_padded_tensor = nonwhite_tensor
+
+        if white_tensor.size(padding_dim) < max_size:
+            padding_size = max_size - white_tensor.size(padding_dim)
+            padding = [0] * (2 * white_tensor.ndim)
+            if white_tensor.ndim % 2 == 0:
+                padding[padding_dim] = padding_size
+            else:
+                padding[2 * padding_dim] = padding_size // 2
+                padding[2 * padding_dim + 1] = padding_size - (padding_size // 2)
+            white_padded_tensor = nn.functional.pad(white_tensor, padding, mode='constant', value=0)
+        else:
+            white_padded_tensor = white_tensor
+    
+        unsorted_padded_tensor = torch.cat((nonwhite_padded_tensor, white_padded_tensor), dim=0)
+        return unsorted_padded_tensor
+
+
+    def sort_tensor(self, idx_tensor, target_tensor):
+        sorted_idx = idx_tensor.argsort()
+        sorted_tensor = target_tensor[sorted_idx]
+        
+        return sorted_tensor
+
 
     @add_start_docstrings_to_model_forward(INSTRUCTBLIP_INPUTS_DOCSTRING)
     @replace_return_docstrings(
@@ -1396,104 +1442,253 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         The unusual aspect of this image is that a man is ironing clothes on the back of a yellow SUV, which is parked in the middle of a busy city street. This is an unconventional approach to ironing clothes, as it requires the man to balance himself and his ironing equipment on top of the vehicle while navigating through traffic. Additionally, the presence of taxis and other vehicles in the scene further emphasizes the unusual nature of this situation.
         ```"""
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        
-        # step 1: forward the images through the vision encoder,
-        # to get image embeddings of shape (batch_size, seq_len, hidden_size)
-        vision_outputs = self.vision_model(
-            pixel_values=pixel_values,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-        image_embeds = vision_outputs[0] #NOTE shape? #[B, tokens(257), dim (1408)]
-        if sam_feature != None:
-            if use_onlySAM:
-                image_embeds = sam_feature # [B, 256, 1408] #SAM feature만 사용한다. 
+        nonwhite_image_index = torch.arange(pixel_values.size(0))
+        white_image_index = torch.tensor(white_image_index, dtype=torch.int)
+        if white_image_index.size(0) > 0: 
+            mask = ~torch.isin(nonwhite_image_index, white_image_index)
+            nonwhite_image_index = nonwhite_image_index[mask]
+
+        # [1] for non-white images
+        if nonwhite_image_index.size(0) > 0:
+            # get non-white images values only
+            nonwhite_pixel_values = pixel_values[nonwhite_image_index]
+            nonwhite_qformer_input_ids = qformer_input_ids[nonwhite_image_index]
+            nonwhite_qformer_attention_mask = qformer_attention_mask[nonwhite_image_index] if qformer_attention_mask is not None else None
+            nonwhite_input_ids = input_ids[nonwhite_image_index] if input_ids is not None else None
+            nonwhite_attention_mask = attention_mask[nonwhite_image_index] if attention_mask is not None else None
+            nonwhite_decoder_input_ids = decoder_input_ids[nonwhite_image_index] if decoder_input_ids is not None else None
+            nonwhite_decoder_attention_mask = decoder_attention_mask[nonwhite_image_index] if decoder_attention_mask is not None else None
+            nonwhite_labels = labels[nonwhite_image_index] if labels is not None else None
+            nonwhite_sam_feature = sam_feature[nonwhite_image_index] if sam_feature is not None else None
+            nonwhite_image_attention_mask = image_attention_mask[nonwhite_image_index] if image_attention_mask is not None else None
+            nonwhite_category_gt = category_gt[nonwhite_image_index] if category_gt is not None else None
+
+            # step 1: forward the images through the vision encoder,
+            # to get image embeddings of shape (batch_size, seq_len, hidden_size) 
+            nonwhite_vision_outputs = self.vision_model(
+                pixel_values=nonwhite_pixel_values,
+                output_attentions=output_attentions, 
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+            )
+
+            image_embeds = nonwhite_vision_outputs[0] #NOTE shape? #[B, tokens(257), dim (1408)]
+            if nonwhite_sam_feature != None:
+                if use_onlySAM:
+                    image_embeds = nonwhite_sam_feature # [B, 256, 1408] #SAM feature만 사용한다. 
+                else:
+                    image_embeds = torch.cat([image_embeds, nonwhite_sam_feature], dim=1) #[B, 257+256, dim(1408)]
+
+            # step 2: forward the query tokens through the QFormer, using the image embeddings for cross-attention
+            if nonwhite_image_attention_mask is None:
+                nonwhite_image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
+
+            if white_image_crossattention == False and nonwhite_sam_feature == None:
+                if len(white_image_index) != 0:
+                    nonwhite_image_attention_mask[white_image_index] = 0 # mask out white image when cross attention
+            
+            # difference with BLIP-2 here: we also feed the instruction prompt to the Q-Former
+            query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
+            query_attention_mask = torch.ones(query_tokens.size()[:-1], dtype=torch.long, device=image_embeds.device)
+            if nonwhite_qformer_attention_mask is None:
+                nonwhite_qformer_attention_mask = torch.ones_like(nonwhite_qformer_input_ids)
+            nonwhite_qformer_attention_mask = torch.cat([query_attention_mask, nonwhite_qformer_attention_mask], dim=1)
+
+            nonwhite_query_outputs = self.qformer(
+                input_ids=nonwhite_qformer_input_ids,
+                attention_mask=nonwhite_qformer_attention_mask,
+                query_embeds=query_tokens,
+                encoder_hidden_states=image_embeds,
+                encoder_attention_mask=nonwhite_image_attention_mask,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+            )
+            nonwhite_query_output = nonwhite_query_outputs[0][:, : query_tokens.size(1), :]
+
+            # add additional loss
+            cls_loss = None
+            if nonwhite_category_gt != None:
+                category_hidden_state = self.category_cls_head(torch.mean(nonwhite_query_output, dim=1)) #[B, 8]
+                cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
+                cls_loss = cls_loss_criterion(category_hidden_state, category_gt)
+            # step 3: use the language model, conditioned on the query outputs and the prompt
+            language_model_inputs = self.language_projection(nonwhite_query_output)
+            language_model_attention_mask = torch.ones(
+                language_model_inputs.size()[:-1], dtype=torch.long, device=language_model_inputs.device
+            )
+            nonwhite_inputs_embeds = self.language_model.get_input_embeddings()(nonwhite_input_ids)
+
+            nonwhite_inputs_embeds = torch.cat([language_model_inputs, nonwhite_inputs_embeds.to(language_model_inputs.device)], dim=1)
+
+            if nonwhite_attention_mask is None:
+                nonwhite_attention_mask = torch.ones_like(nonwhite_input_ids)
+            nonwhite_attention_mask = torch.cat([language_model_attention_mask.to(attention_mask.device), nonwhite_attention_mask], dim=1)
+            
+
+    
+            if self.config.use_decoder_only_language_model:
+                nonwhite_outputs = self.language_model(
+                    inputs_embeds=nonwhite_inputs_embeds,
+                    attention_mask=nonwhite_attention_mask,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                )
+                nonwhite_logits = nonwhite_outputs.logits if return_dict else nonwhite_outputs[0]
+                nonwhite_loss = None
+                # we compute the loss here since we need to take into account the sequence length of the query embeds
+                if nonwhite_labels is not None:
+                    nonwhite_labels = nonwhite_labels.to(nonwhite_logits.device)
+                    nonwhite_logits = nonwhite_logits[:, -nonwhite_labels.size(1) :, :]
+                    # Shift so that tokens < n predict n
+                    nonwhite_shift_logits = nonwhite_logits[..., :-1, :].contiguous()
+                    nonwhite_shift_labels = nonwhite_labels[..., 1:].contiguous().to(nonwhite_logits.device)
+
+                    # Flatten the tokens
+                    nonwhite_loss_fct = CrossEntropyLoss(reduction="mean")
+
+                    nonwhite_loss = nonwhite_loss_fct(nonwhite_shift_logits.view(-1, self.config.text_config.vocab_size), nonwhite_shift_labels.view(-1))
             else:
-                image_embeds = torch.cat([image_embeds, sam_feature], dim=1) #[B, 257+256, dim(1408)]
+                nonwhite_outputs = self.language_model(
+                    inputs_embeds=nonwhite_inputs_embeds,
+                    attention_mask=nonwhite_attention_mask,
+                    decoder_input_ids=nonwhite_decoder_input_ids,
+                    decoder_attention_mask=nonwhite_decoder_attention_mask,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    labels=nonwhite_labels,
+                )
+                
+                nonwhite_loss = nonwhite_outputs.loss if return_dict else nonwhite_outputs[0]
+                # cls loss 위치 변경 되면 수정
+                # if cls_loss != None:
+                #     loss += cls_loss
+                nonwhite_logits = nonwhite_outputs.logits if return_dict else nonwhite_outputs[1]
 
-        # step 2: forward the query tokens through the QFormer, using the image embeddings for cross-attention
-        if image_attention_mask is None:
-            image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
+        # [2] for white images
+        if white_image_index.size(0) > 0: 
+            # get white image values only
+            white_pixel_values = pixel_values[white_image_index]
+            white_qformer_input_ids = qformer_input_ids[white_image_index]
+            white_qformer_attention_mask = qformer_attention_mask[white_image_index] if qformer_attention_mask is not None else None
+            white_input_ids = input_ids[white_image_index] if input_ids is not None else None
+            white_attention_mask = attention_mask[white_image_index] if attention_mask is not None else None
+            white_decoder_input_ids = decoder_input_ids[white_image_index] if decoder_input_ids is not None else None
+            white_decoder_attention_mask = decoder_attention_mask[white_image_index] if decoder_attention_mask is not None else None
+            white_labels = labels[white_image_index] if labels is not None else None
+            white_sam_feature = sam_feature[white_image_index] if sam_feature is not None else None
+            white_image_attention_mask = image_attention_mask[white_image_index] if image_attention_mask is not None else None
+            white_category_gt = category_gt[white_image_index] if category_gt is not None else None
+            white_inputs_embeds = self.language_model.get_input_embeddings()(white_input_ids).to(language_model_inputs.device)
 
-        if white_image_crossattention == False and sam_feature == None:
-            if len(white_image_index) != 0:
-                image_attention_mask[white_image_index] = 0 # mask out white image when cross attention
+            if white_attention_mask is None:
+                white_attention_mask = torch.ones_like(white_input_ids)
+    
+            if self.config.use_decoder_only_language_model:
+                white_outputs = self.language_model(
+                    inputs_embeds=white_inputs_embeds,
+                    attention_mask=white_attention_mask,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                )
+                white_logits = white_outputs.logits if return_dict else white_outputs[0]
+                white_loss = None
+                # we compute the loss here since we need to take into account the sequence length of the query embeds
+                if white_labels is not None:
+                    white_labels = white_labels.to(white_logits.device)
+                    white_logits = white_logits[:, -white_labels.size(1) :, :]
+                    # Shift so that tokens < n predict n
+                    white_shift_logits = white_logits[..., :-1, :].contiguous()
+                    white_shift_labels = white_labels[..., 1:].contiguous().to(white_logits.device)
 
-        # difference with BLIP-2 here: we also feed the instruction prompt to the Q-Former
-        query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
-        query_attention_mask = torch.ones(query_tokens.size()[:-1], dtype=torch.long, device=image_embeds.device)
-        if qformer_attention_mask is None:
-            qformer_attention_mask = torch.ones_like(qformer_input_ids)
-        qformer_attention_mask = torch.cat([query_attention_mask, qformer_attention_mask], dim=1)
-        query_outputs = self.qformer(
-            input_ids=qformer_input_ids,
-            attention_mask=qformer_attention_mask,
-            query_embeds=query_tokens,
-            encoder_hidden_states=image_embeds,
-            encoder_attention_mask=image_attention_mask,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-        query_output = query_outputs[0][:, : query_tokens.size(1), :]
+                    # Flatten the tokens
+                    white_loss_fct = CrossEntropyLoss(reduction="mean")
 
-        # add additional loss
-        cls_loss = None
-        if category_gt != None:
-            category_hidden_state = self.category_cls_head(torch.mean(query_output, dim=1)) #[B, 8]
-            cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
-            cls_loss = cls_loss_criterion(category_hidden_state, category_gt)
-        # step 3: use the language model, conditioned on the query outputs and the prompt
-        language_model_inputs = self.language_projection(query_output)
-        language_model_attention_mask = torch.ones(
-            language_model_inputs.size()[:-1], dtype=torch.long, device=language_model_inputs.device
-        )
-        inputs_embeds = self.language_model.get_input_embeddings()(input_ids)
+                    white_loss = white_loss_fct(white_shift_logits.view(-1, self.config.text_config.vocab_size), white_shift_labels.view(-1))
+            else:
+                white_outputs = self.language_model(
+                    inputs_embeds=white_inputs_embeds,
+                    attention_mask=white_attention_mask,
+                    decoder_input_ids=white_decoder_input_ids,
+                    decoder_attention_mask=white_decoder_attention_mask,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    labels=white_labels,
+                )
+                white_loss = white_outputs.loss if return_dict else white_outputs[0]
+                # cls loss 위치 변경 되면 수정
+                # if cls_loss != None:
+                #     loss += cls_loss
+                white_logits = white_outputs.logits if return_dict else white_outputs[1]
 
-        inputs_embeds = torch.cat([language_model_inputs, inputs_embeds.to(language_model_inputs.device)], dim=1)
 
-        if attention_mask is None:
-            attention_mask = torch.ones_like(input_ids)
-        attention_mask = torch.cat([language_model_attention_mask.to(attention_mask.device), attention_mask], dim=1)
+        # [3] concat and sort
+        if white_image_index.size(0) > 0 and nonwhite_image_index.size(0) > 0:
+            unsorted_idx = torch.cat((nonwhite_image_index, white_image_index), dim=0)
+            loss = nonwhite_loss / pixel_values.size(0) * nonwhite_image_index.size(0) + white_loss / pixel_values.size(0) * white_image_index.size(0)
+            logits = self.sort_tensor(unsorted_idx, torch.cat((nonwhite_logits, white_logits), dim=0))
+        
+            assert len(nonwhite_outputs[2]) == len(white_outputs[2]), "the length of nonwhite_outputs[2] and white_outputs[2] are different."
+            past_key_values = []
+            for nonwhite, white in zip(nonwhite_outputs[2], white_outputs[2]):
 
-        if self.config.use_decoder_only_language_model:
-            outputs = self.language_model(
-                inputs_embeds=inputs_embeds,
-                attention_mask=attention_mask,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
+                past_key_values.append(tuple([
+                self.sort_tensor(unsorted_idx, torch.cat((nonwhite[0], white[0]), dim=0)),
+                self.sort_tensor(unsorted_idx, torch.cat((nonwhite[1], white[1]), dim=0)),
+
+                self.sort_tensor(unsorted_idx.to(white[2].device), self.pad_and_concat(nonwhite[2].data, white[2].data, padding_dim=2)),
+                self.sort_tensor(unsorted_idx.to(white[3].device), self.pad_and_concat(nonwhite[3].data, white[3].data, padding_dim=2))
+                ]))
+
+            past_key_values = tuple(past_key_values)
+            
+            encoder_last_hidden_state =  self.sort_tensor(unsorted_idx.to(nonwhite_outputs[3].device), self.pad_and_concat(nonwhite_outputs[3], white_outputs[3], padding_dim=1))
+            
+            vision_outputs = BaseModelOutputWithPooling(
+                last_hidden_state = self.sort_tensor(unsorted_idx.to(nonwhite_vision_outputs["last_hidden_state"].device), torch.cat(((nonwhite_vision_outputs["last_hidden_state"], torch.zeros_like(nonwhite_vision_outputs["last_hidden_state"][:1]).repeat(white_image_index.size(0), 1, 1).to(nonwhite_vision_outputs["last_hidden_state"].device))), dim=0)),
+                pooler_output = self.sort_tensor(unsorted_idx.to(nonwhite_vision_outputs["pooler_output"].device), torch.cat(((nonwhite_vision_outputs["pooler_output"], torch.zeros_like(nonwhite_vision_outputs["pooler_output"][:1]).repeat(white_image_index.size(0), 1).to(nonwhite_vision_outputs["pooler_output"].device))), dim=0))
             )
-            logits = outputs.logits if return_dict else outputs[0]
-            loss = None
-            # we compute the loss here since we need to take into account the sequence length of the query embeds
-            if labels is not None:
-                labels = labels.to(logits.device)
-                logits = logits[:, -labels.size(1) :, :]
-                # Shift so that tokens < n predict n
-                shift_logits = logits[..., :-1, :].contiguous()
-                shift_labels = labels[..., 1:].contiguous().to(logits.device)
 
-                # Flatten the tokens
-                loss_fct = CrossEntropyLoss(reduction="mean")
-
-                loss = loss_fct(shift_logits.view(-1, self.config.text_config.vocab_size), shift_labels.view(-1))
-        else:
-            outputs = self.language_model(
-                inputs_embeds=inputs_embeds,
-                attention_mask=attention_mask,
-                decoder_input_ids=decoder_input_ids,
-                decoder_attention_mask=decoder_attention_mask,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-                labels=labels,
+            query_outputs = BaseModelOutputWithPoolingAndCrossAttentions(
+                last_hidden_state = self.sort_tensor(unsorted_idx.to(nonwhite_query_outputs["last_hidden_state"].device), torch.cat(((nonwhite_query_outputs["last_hidden_state"], torch.zeros_like(nonwhite_query_outputs["last_hidden_state"][:1]).repeat(white_image_index.size(0), 1, 1).to(nonwhite_query_outputs["last_hidden_state"].device))), dim=0)),
+                pooler_output = self.sort_tensor(unsorted_idx.to(nonwhite_query_outputs["pooler_output"].device), torch.cat(((nonwhite_query_outputs["pooler_output"], torch.zeros_like(nonwhite_query_outputs["pooler_output"][:1]).repeat(white_image_index.size(0), 1).to(nonwhite_query_outputs["pooler_output"].device))), dim=0))
             )
-            loss = outputs.loss if return_dict else outputs[0]
-            if cls_loss != None:
-                loss += cls_loss
-            logits = outputs.logits if return_dict else outputs[1]
+        elif nonwhite_image_index.size(0) > 0:
+            loss = nonwhite_loss
+            logits = nonwhite_logits
+        
+            past_key_values = nonwhite_outputs[2]
+            
+            encoder_last_hidden_state =  nonwhite_outputs[3]
+            vision_outputs = nonwhite_vision_outputs
+
+            query_outputs = nonwhite_query_outputs
+
+        else: # white_image only
+            if not return_dict:
+                output = (white_logits, None, None, white_outputs)
+                return ((white_loss,) + output) if white_loss is not None else output
+            
+            return InstructBlipForConditionalGenerationModelOutput(
+                loss=white_loss,
+                logits=white_logits,
+                vision_outputs=None,
+                qformer_outputs=None,
+                language_model_outputs=white_outputs,
+            )
+
+        
+        outputs = Seq2SeqLMOutput(
+            loss = loss,
+            logits = logits,
+            past_key_values = past_key_values,
+            encoder_last_hidden_state = encoder_last_hidden_state
+        )
+
 
         if not return_dict:
             output = (logits, vision_outputs, query_outputs, outputs)
@@ -1506,6 +1701,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             qformer_outputs=query_outputs,
             language_model_outputs=outputs,
         )
+
 
     @torch.no_grad()
     def generate(
@@ -1541,85 +1737,139 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         Returns:
             captions (list): A list of strings of length batch_size * num_captions.
         """
+        nonwhite_outputs, white_outputs = None, None
         if hasattr(self, "hf_device_map"):
             # preprocess for `accelerate`
             self._preprocess_accelerate()
+  
+        if pixel_values is not None:
+            batch_size = pixel_values.shape[0]
+            nonwhite_image_index = torch.arange(batch_size)
+            white_image_index = torch.tensor(white_image_index, dtype=torch.int)
+            if white_image_index.size(0) > 0: 
+                mask = ~torch.isin(nonwhite_image_index, white_image_index)
+                nonwhite_image_index = nonwhite_image_index[mask]
 
-        batch_size = pixel_values.shape[0]
-        image_embeds = self.vision_model(pixel_values, return_dict=True).last_hidden_state
-        if sam_feature != None:
-            if use_onlySAM:
-                image_embeds = sam_feature # [B, 256, 1408] #SAM feature만 사용한다. 
-            else:
-                image_embeds = torch.cat([image_embeds, sam_feature], dim=1) #[B, 257+256, dim(1408)]
+            # [1] for nonwhite images
+            if nonwhite_image_index.size(0) > 0:
+                nonwhite_pixel_values = pixel_values[nonwhite_image_index]
+                nonwhite_qformer_input_ids = qformer_input_ids[nonwhite_image_index] if qformer_input_ids is not None else None
+                nonwhite_qformer_attention_mask = qformer_attention_mask[nonwhite_image_index] if qformer_attention_mask is not None else None
+                nonwhite_input_ids = input_ids[nonwhite_image_index] if input_ids is not None else None
+                nonwhite_attention_mask = attention_mask[nonwhite_image_index] if attention_mask is not None else None
+                nonwhite_sam_feature = sam_feature[nonwhite_image_index] if sam_feature is not None else None
+                nonwhite_image_attention_mask = image_attention_mask[nonwhite_image_index] if image_attention_mask is not None else None
 
-        if image_attention_mask is None:
-            image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
+                image_embeds = self.vision_model(nonwhite_pixel_values, return_dict=True).last_hidden_state
+                if sam_feature != None:
+                    if use_onlySAM:
+                        image_embeds = nonwhite_sam_feature # [B, 256, 1408] #SAM feature만 사용한다. 
+                    else:
+                        image_embeds = torch.cat([image_embeds, nonwhite_sam_feature], dim=1) #[B, 257+256, dim(1408)]
 
-        if white_image_crossattention == False and sam_feature == None: #SAM feature쓸 때는 white image crossattention비활성화
-            if len(white_image_index) != 0:
-                image_attention_mask[white_image_index] = 0 #mask out white images when cross attention to qformer
+                if nonwhite_image_attention_mask is None:
+                    nonwhite_image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
 
-        query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
-        query_attention_mask = torch.ones(query_tokens.size()[:-1], dtype=torch.long, device=image_embeds.device)
-        if qformer_attention_mask is None:
-            qformer_attention_mask = torch.ones_like(qformer_input_ids)
-        qformer_attention_mask = torch.cat([query_attention_mask, qformer_attention_mask], dim=1)
-        query_outputs = self.qformer(
-            input_ids=qformer_input_ids,
-            attention_mask=qformer_attention_mask,
-            query_embeds=query_tokens,
-            encoder_hidden_states=image_embeds,
-            encoder_attention_mask=image_attention_mask,
-            return_dict=True,
-        )
-        query_output = query_outputs.last_hidden_state[:, : query_tokens.size(1), :]
+                # if white_image_crossattention == False and sam_feature == None: #SAM feature쓸 때는 white image crossattention비활성화
+                #     if len(white_image_index) != 0:
+                #         image_attention_mask[white_image_index] = 0 #mask out white images when cross attention to qformer
 
-        language_model_inputs = self.language_projection(query_output)
-        language_attention_mask = torch.ones(
-            language_model_inputs.size()[:-1], dtype=torch.long, device=language_model_inputs.device
-        )
+                query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
+                query_attention_mask = torch.ones(query_tokens.size()[:-1], dtype=torch.long, device=image_embeds.device)
+                if nonwhite_qformer_attention_mask is None:
+                    nonwhite_qformer_attention_mask = torch.ones_like(nonwhite_qformer_input_ids)
+                nonwhite_qformer_attention_mask = torch.cat([query_attention_mask, nonwhite_qformer_attention_mask], dim=1)
+                query_outputs = self.qformer(
+                    input_ids=nonwhite_qformer_input_ids,
+                    attention_mask=nonwhite_qformer_attention_mask,
+                    query_embeds=query_tokens,
+                    encoder_hidden_states=image_embeds,
+                    encoder_attention_mask=nonwhite_image_attention_mask,
+                    return_dict=True,
+                )
+                query_output = query_outputs.last_hidden_state[:, : query_tokens.size(1), :]
 
-        if input_ids is None:
-            input_ids = (
-                torch.LongTensor([[self.config.text_config.bos_token_id]])
-                .repeat(batch_size, 1)
-                .to(image_embeds.device)
+                language_model_inputs = self.language_projection(query_output)
+                language_attention_mask = torch.ones(
+                    language_model_inputs.size()[:-1], dtype=torch.long, device=language_model_inputs.device
+                )
+
+                if nonwhite_input_ids is None:
+                    nonwhite_input_ids = (
+                        torch.LongTensor([[self.config.text_config.bos_token_id]])
+                        .repeat(nonwhite_image_index.size(0), 1)
+                        .to(image_embeds.device)
+                    )
+                if nonwhite_attention_mask is None:
+                    nonwhite_attention_mask = torch.ones_like(nonwhite_input_ids)
+                nonwhite_attention_mask = torch.cat([language_attention_mask, nonwhite_attention_mask.to(language_attention_mask.device)], dim=1)
+                
+                nonwhite_inputs_embeds = self.get_input_embeddings()(nonwhite_input_ids)
+                nonwhite_inputs_embeds = torch.cat([language_model_inputs, nonwhite_inputs_embeds.to(language_model_inputs.device)], dim=1)
+
+                # add image_embeds length to max_length, so that the final max_length in counted only on token embeds
+                # -1 is to account for the prepended BOS after `generate.`
+                if not self.language_model.config.is_encoder_decoder:
+                    generate_kwargs["max_length"] = generate_kwargs.get("max_length", 20) + language_model_inputs.shape[1] - 1
+                    generate_kwargs["min_length"] = generate_kwargs.get("min_length", 0) + language_model_inputs.shape[1]
+
+                nonwhite_outputs = self.language_model.generate(
+                    inputs_embeds=nonwhite_inputs_embeds,
+                    attention_mask=nonwhite_attention_mask,
+                    **generate_kwargs,
+                )
+
+                # this is a temporary workaround to be consistent with other generation models and
+                # have BOS as the first token, even though under the hood we are calling LM with embeds
+                if not self.language_model.config.is_encoder_decoder:
+                    # the InstructBLIP authors used inconsistent tokenizer/model files during training,
+                    # with the tokenizer's bos token being set to </s> which has ID=2,
+                    # whereas the model's text config has bos token id = 0
+                    nonwhite_bos_token_id = (
+                        2
+                        if self.config.text_config.architectures[0] == "LLaMAForCausalLM"
+                        else self.config.text_config.bos_token_id
+                    )
+                    nonwhite_bos_tokens = torch.LongTensor([[bos_token_id]]).repeat(nonwhite_image_index.size(0), 1).to(image_embeds.device) #오류 날 것 같은데...
+                    if not isinstance(nonwhite_outputs, torch.Tensor):
+                        nonwhite_outputs.sequences = torch.cat([nonwhite_bos_tokens, nonwhite_outputs.sequences], dim=-1)
+                    else:
+                        nonwhite_outputs = torch.cat([nonwhite_bos_tokens, nonwhite_outputs], dim=-1)    
+
+        # [2] white image
+        if white_image_index.size(0) > 0:
+            white_input_ids = input_ids[white_image_index]
+            white_attention_mask = attention_mask[white_image_index]
+            white_inputs_embeds = self.get_input_embeddings()(white_input_ids).to(language_model_inputs.device)
+
+            white_outputs = self.language_model.generate(
+                inputs_embeds=white_inputs_embeds,
+                attention_mask=white_attention_mask,
+                **generate_kwargs,
             )
-        if attention_mask is None:
-            attention_mask = torch.ones_like(input_ids)
-        attention_mask = torch.cat([language_attention_mask, attention_mask.to(language_attention_mask.device)], dim=1)
 
-        # concatenate query embeddings with prompt embeddings
-        inputs_embeds = self.get_input_embeddings()(input_ids)
-        inputs_embeds = torch.cat([language_model_inputs, inputs_embeds.to(language_model_inputs.device)], dim=1)
+            # this is a temporary workaround to be consistent with other generation models and
+            # have BOS as the first token, even though under the hood we are calling LM with embeds
+            if not self.language_model.config.is_encoder_decoder:
+                # the InstructBLIP authors used inconsistent tokenizer/model files during training,
+                # with the tokenizer's bos token being set to </s> which has ID=2,
+                # whereas the model's text config has bos token id = 0
+                white_bos_token_id = (
+                    2
+                    if self.config.text_config.architectures[0] == "LLaMAForCausalLM"
+                    else self.config.text_config.bos_token_id
+                )
+                white_bos_tokens = torch.LongTensor([[white_bos_token_id]]).repeat(white_image_index.size(0), 1).to(white_inputs_embeds.device)
+                if not isinstance(white_outputs, torch.Tensor):
+                    white_outputs.sequences = torch.cat([white_bos_tokens, white_outputs.sequences], dim=-1)
+                else:
+                    white_outputs = torch.cat([white_bos_tokens, white_outputs], dim=-1)
 
-        # add image_embeds length to max_length, so that the final max_length in counted only on token embeds
-        # -1 is to account for the prepended BOS after `generate.`
-        if not self.language_model.config.is_encoder_decoder:
-            generate_kwargs["max_length"] = generate_kwargs.get("max_length", 20) + language_model_inputs.shape[1] - 1
-            generate_kwargs["min_length"] = generate_kwargs.get("min_length", 0) + language_model_inputs.shape[1]
-        outputs = self.language_model.generate(
-            inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
-            **generate_kwargs,
-        )
-
-        # this is a temporary workaround to be consistent with other generation models and
-        # have BOS as the first token, even though under the hood we are calling LM with embeds
-        if not self.language_model.config.is_encoder_decoder:
-            # the InstructBLIP authors used inconsistent tokenizer/model files during training,
-            # with the tokenizer's bos token being set to </s> which has ID=2,
-            # whereas the model's text config has bos token id = 0
-            bos_token_id = (
-                2
-                if self.config.text_config.architectures[0] == "LLaMAForCausalLM"
-                else self.config.text_config.bos_token_id
-            )
-            bos_tokens = torch.LongTensor([[bos_token_id]]).repeat(batch_size, 1).to(image_embeds.device)
-            if not isinstance(outputs, torch.Tensor):
-                outputs.sequences = torch.cat([bos_tokens, outputs.sequences], dim=-1)
-            else:
-                outputs = torch.cat([bos_tokens, outputs], dim=-1)
+        # [3] sort and concat
+        if nonwhite_outputs is not None and white_outputs is not None:
+            unsorted_idx = torch.cat((nonwhite_image_index, white_image_index), dim=0)
+            outputs = self.sort_tensor(unsorted_idx, torch.cat((nonwhite_outputs, white_outputs), dim=0))
+        else:
+            outputs = nonwhite_outputs if white_outputs is None else white_outputs
 
         return outputs

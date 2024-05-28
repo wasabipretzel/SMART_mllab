@@ -11,6 +11,7 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, List
 import transformers
+from torchvision import transforms
 
 from utils.util import is_float
 
@@ -218,6 +219,52 @@ class InstructblipFlant5Dataset(Dataset):
         
         return token_mask #[257]
 
+
+    def get_image_mask(self, qa_pair):
+        image_path = os.path.join(self.data_args.data_path, qa_pair["puzzle_id"], "img", qa_pair["image"])
+        image_chw = Image.open(image_path).convert("RGB")
+        patch_size = self.data_args.patch_size
+
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor()  # PIL 이미지를 PyTorch 텐서로 변환 (C, H, W)
+        ])  # 변환 적용
+        image_chw = transform(image_chw)
+        
+        _, height, width = image_chw.size()
+        
+        # 패치의 개수 계산
+        num_patches_h = height // patch_size
+        num_patches_w = width // patch_size
+        
+        # 결과 리스트 초기화
+        patch_map = [[0 for _ in range(num_patches_w)] for _ in range(num_patches_h)]
+        
+        # 각 패치 영역 순회
+        for i in range(num_patches_h):
+            for j in range(num_patches_w):
+                # 패치 영역 슬라이싱
+                patch = image_chw[:, i*patch_size:(i+1)*patch_size, j*patch_size:(j+1)*patch_size]
+                
+                # 패치가 전부 흰색인지 확인
+                if torch.all(patch == 1):
+                    patch_map[i][j] = 0
+                else:
+                    patch_map[i][j] = 1
+        
+        # 2차원 리스트를 1차원 텐서로 변환
+        patch_map_tensor = torch.tensor(sum(patch_map, []), dtype=torch.int32)
+        
+        # 1차원 텐서를 256 크기로 변환
+        upsampled_map = patch_map_tensor.repeat(256 // len(patch_map_tensor))
+        
+        # 맨 앞에 1 추가
+        upsampled_map = torch.cat((torch.tensor([1]), upsampled_map))
+        
+        
+        return upsampled_map
+
+
     def get_category_num(self, qa_pair):
         image_name = qa_pair["image"]  # 'puzzle_19_e_1.png', 
         puzzle_id = qa_pair["puzzle_id"]
@@ -244,6 +291,9 @@ class InstructblipFlant5Dataset(Dataset):
 
         if self.data_args.SAM_token_mask:
             image_attention_mask = self.get_token_mask(single_qa_pair)
+
+        if self.data_args.image_mask:
+            image_attention_mask = self.get_image_mask(single_qa_pair)
         
         if self.data_args.category_classification_mapping_path != None:
             gt_category_num = self.get_category_num(single_qa_pair)
@@ -269,7 +319,7 @@ class InstructblipFlant5Dataset(Dataset):
 
             # for white background exclude
             'is_only_white' : self.check_white(single_qa_pair), #bool
-            "image_attention_mask" : image_attention_mask if self.data_args.SAM_token_mask else None,
+            "image_attention_mask" : image_attention_mask if (self.data_args.SAM_token_mask or self.data_args.image_mask) else None,
             
             # for additional category loss
             "category_num" : gt_category_num if self.data_args.category_classification_mapping_path != None else None
@@ -287,6 +337,7 @@ class InstructblipFlant5_collator(object):
     data_args:transformers.PretrainedConfig
     processor:transformers.ProcessorMixin
 
+
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         b_pixel_values = []
         b_text_input = []
@@ -295,12 +346,13 @@ class InstructblipFlant5_collator(object):
         b_sam_feature = []
         white_image_index = []
         token_mask_image_attention = [] if self.data_args.SAM_token_mask else None
+        mask_image_attention = [] if self.data_args.image_mask else None
         b_category_gt_num = [] if self.data_args.category_classification_mapping_path != None else None
         mode = instances[0]["mode"]
 
         for idx, each_batch in enumerate(instances):
             #qformer input
-            b_pixel_values.append(each_batch["pixel_values"]) 
+            b_pixel_values.append(each_batch["pixel_values"])
             b_qformer_text_input.append(each_batch["question"])
             #llm I/O
             b_text_input.append(each_batch["text_input"])
@@ -311,6 +363,8 @@ class InstructblipFlant5_collator(object):
                 white_image_index.append(idx)
             if self.data_args.SAM_token_mask:
                 token_mask_image_attention.append(each_batch["image_attention_mask"])
+            if self.data_args.image_mask:
+                mask_image_attention.append(each_batch["image_attention_mask"])
             if self.data_args.category_classification_mapping_path != None:
                 b_category_gt_num.append(each_batch["category_num"])
 
@@ -334,10 +388,12 @@ class InstructblipFlant5_collator(object):
         b_sam_feature = torch.stack(b_sam_feature, dim=0) if b_sam_feature[0] != None else None
         if self.data_args.SAM_token_mask:
             token_mask_image_attention = torch.stack(token_mask_image_attention, dim=0)
+        if self.data_args.image_mask:
+            mask_image_attention = torch.stack(mask_image_attention, dim=0)
 
         if mode == "train":
             inputs = {
-                "pixel_values" : image_input.pixel_values,
+                "pixel_values" : image_input.pixel_values if image_input.pixel_values is not None else None,
                 "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
                 "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
                 "input_ids" : text_input.input_ids,
@@ -348,12 +404,12 @@ class InstructblipFlant5_collator(object):
                 #for sam experiment
                 "sam_feature" : b_sam_feature, # if sam feature is used, torch.tensor, else None -> need to used at modeling_instructblip.py
                 "white_image_index" : white_image_index,
-                "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else None,
+                "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else mask_image_attention if self.data_args.image_mask else None,
                 "category_gt" : torch.tensor(b_category_gt_num) if b_category_gt_num != None else None 
             }
         else:
             inputs = {
-                "pixel_values" : image_input.pixel_values,
+                "pixel_values" : image_input.pixel_values if image_input.pixel_values is not None else None,
                 "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
                 "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
                 # for generation, need different input_ids and att_mask
@@ -363,7 +419,7 @@ class InstructblipFlant5_collator(object):
                 #for sam experiment
                 "sam_feature" : b_sam_feature,
                 "white_image_index" : white_image_index,
-                "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else None,
+                "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else mask_image_attention if self.data_args.image_mask else None
             } 
         
         return inputs
