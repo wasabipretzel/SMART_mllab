@@ -365,6 +365,7 @@ class InstructblipFlant5_collator(object):
                 "sam_feature" : b_sam_feature,
                 "white_image_index" : white_image_index,
                 "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else None,
+                "category_gt" : torch.tensor(b_category_gt_num) if b_category_gt_num != None else None 
             } 
         
         return inputs

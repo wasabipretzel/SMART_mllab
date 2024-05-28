@@ -1521,6 +1521,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         white_image_crossattention: Optional[bool] = True,
         use_onlySAM: Optional[bool] = False,
         image_attention_mask: Optional[torch.LongTensor] = None,
+        category_gt: Optional[torch.tensor] = None,
         **generate_kwargs,
     ) -> torch.LongTensor:
         """
@@ -1576,6 +1577,12 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         query_output = query_outputs.last_hidden_state[:, : query_tokens.size(1), :]
 
         language_model_inputs = self.language_projection(query_output)
+        cls_loss = None
+        if category_gt != None:
+            category_hidden_state = self.category_cls_head(torch.mean(language_model_inputs, dim=1)) #[B, 8]
+            cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
+            cls_loss = cls_loss_criterion(category_hidden_state, category_gt)
+
         language_attention_mask = torch.ones(
             language_model_inputs.size()[:-1], dtype=torch.long, device=language_model_inputs.device
         )
@@ -1604,7 +1611,6 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             attention_mask=attention_mask,
             **generate_kwargs,
         )
-
         # this is a temporary workaround to be consistent with other generation models and
         # have BOS as the first token, even though under the hood we are calling LM with embeds
         if not self.language_model.config.is_encoder_decoder:
