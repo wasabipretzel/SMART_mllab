@@ -26,6 +26,7 @@ class InstructblipFlant5Dataset(Dataset):
         self.data_args = data_args
         self.mode = mode
         self.qa_info = self.get_qainfo()
+
         self.generate_option_key()
         self.append_prediction_type() #use for option approximation when prediction type is 'answervalue'
 

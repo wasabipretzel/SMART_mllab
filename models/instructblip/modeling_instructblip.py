@@ -75,6 +75,7 @@ class InstructBlipForConditionalGenerationModelOutput(ModelOutput):
     vision_outputs: Optional[torch.FloatTensor] = None
     qformer_outputs: Optional[Tuple[torch.FloatTensor]] = None
     language_model_outputs: Optional[Tuple[torch.FloatTensor]] = None
+    category_loss: Optional[Tuple[torch.FloatTensor]] = None
 
     def to_tuple(self) -> Tuple[Any]:
         return tuple(
@@ -1227,7 +1228,7 @@ class InstructBlipQFormerModel(InstructBlipPreTrainedModel):
 
 
 class CategoryClassfier(nn.Module):
-    def __init__(self, input_size, output_size, hidden_sizes=[128, 32]):
+    def __init__(self, input_size, output_size, hidden_sizes=[512, 128, 32]):
         super(CategoryClassfier, self).__init__()
         # Create a list of all sizes which includes input, hidden, and output layers
         sizes = [input_size] + hidden_sizes + [output_size]
@@ -1280,7 +1281,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             self._keep_in_fp32_modules.extend(language_model._keep_in_fp32_modules)
 
         self.language_model = language_model
-        self.category_cls_head = CategoryClassfier(input_size=self.qformer.config.hidden_size, output_size=8)
+        self.category_cls_head = CategoryClassfier(input_size=config.text_config.hidden_size, output_size=8)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1437,15 +1438,15 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             return_dict=return_dict,
         )
         query_output = query_outputs[0][:, : query_tokens.size(1), :]
-
+        # step 3: use the language model, conditioned on the query outputs and the prompt
+        language_model_inputs = self.language_projection(query_output)
         # add additional loss
         cls_loss = None
         if category_gt != None:
-            category_hidden_state = self.category_cls_head(torch.mean(query_output, dim=1)) #[B, 8]
+            category_hidden_state = self.category_cls_head(torch.mean(language_model_inputs, dim=1)) #[B, 8]
             cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
             cls_loss = cls_loss_criterion(category_hidden_state, category_gt)
-        # step 3: use the language model, conditioned on the query outputs and the prompt
-        language_model_inputs = self.language_projection(query_output)
+
         language_model_attention_mask = torch.ones(
             language_model_inputs.size()[:-1], dtype=torch.long, device=language_model_inputs.device
         )
@@ -1491,13 +1492,11 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                 labels=labels,
             )
             loss = outputs.loss if return_dict else outputs[0]
-            if cls_loss != None:
-                loss += cls_loss
             logits = outputs.logits if return_dict else outputs[1]
 
         if not return_dict:
             output = (logits, vision_outputs, query_outputs, outputs)
-            return ((loss,) + output) if loss is not None else output
+            return ((loss,) + output) if loss is not None else Output
 
         return InstructBlipForConditionalGenerationModelOutput(
             loss=loss,
@@ -1505,6 +1504,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             vision_outputs=vision_outputs,
             qformer_outputs=query_outputs,
             language_model_outputs=outputs,
+            category_loss=cls_loss
         )
 
     @torch.no_grad()
