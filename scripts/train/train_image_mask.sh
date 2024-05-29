@@ -80,7 +80,7 @@ python /home/work/instructblip/SMART_mllab/train.py \
     --lr_scheduler_type cosine \
     --dataloader_num_workers 4 \
     --project_name SMART_challenge \
-    --run_name instructblip_baseline_image_masking_branch_llm \
+    --run_name instructblip_image_masking_branch_llm_qformer \
     --report_to wandb
 
 

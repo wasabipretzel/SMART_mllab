@@ -11,3 +11,5 @@ checkpoints/*
 utils/openai_test/playground/*
 /Video-LLaVA/Video-LLaVA-7B/*
 /Video-LLaVA/cache_dir/*
+HIP
+*.out
