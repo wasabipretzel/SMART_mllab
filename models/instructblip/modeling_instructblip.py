@@ -1877,22 +1877,19 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             white_input_ids = input_ids[white_image_index] if input_ids is not None else None
             white_attention_mask = attention_mask[white_image_index] if attention_mask is not None else None
             white_image_attention_mask = image_attention_mask[white_image_index] if image_attention_mask is not None else None
-
-
-        
             white_input_ids = input_ids[white_image_index]
             white_attention_mask = attention_mask[white_image_index]
-            white_inputs_embeds = self.get_input_embeddings()(white_input_ids).to(white_language_model_inputs.device)
+            white_inputs_embeds = self.get_input_embeddings()(white_input_ids).to(image_embeds.device)
 
             if white_image_attention_mask is None:
-                white_image_attention_mask = torch.ones(white_image_index.size(0), image_embeds.size()[-2], dtype=torch.long, device=white_language_model_inputs.device)
+                white_image_attention_mask = torch.ones(white_image_index.size(0), image_embeds.size()[-2], dtype=torch.long, device=image_embeds.device)
 
             # if white_image_crossattention == False and sam_feature == None: #SAM feature쓸 때는 white image crossattention비활성화
             #     if len(white_image_index) != 0:
             #         image_attention_mask[white_image_index] = 0 #mask out white images when cross attention to qformer
 
             white_query_tokens = self.query_tokens.expand(white_image_index.size(0), -1, -1)
-            white_query_attention_mask = torch.ones(white_query_tokens.size()[:-1], dtype=torch.long, device=white_language_model_inputs.device)
+            white_query_attention_mask = torch.ones(white_query_tokens.size()[:-1], dtype=torch.long, device=image_embeds.device)
             if white_qformer_attention_mask is None:
                 white_qformer_attention_mask = torch.ones_like(white_qformer_input_ids)
             white_qformer_attention_mask = torch.cat([white_query_attention_mask, white_qformer_attention_mask], dim=1)
@@ -1900,7 +1897,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                 input_ids=white_qformer_input_ids,
                 attention_mask=white_qformer_attention_mask,
                 query_embeds=white_query_tokens,
-                encoder_hidden_states=torch.ones(white_image_index.size(0), image_embeds.size(1), image_embeds.size(2), dtype=torch.bfloat16).to(white_language_model_inputs.device),
+                encoder_hidden_states=torch.ones(white_image_index.size(0), image_embeds.size(1), image_embeds.size(2), dtype=torch.bfloat16).to(image_embeds.device),
                 encoder_attention_mask=white_image_attention_mask,
                 return_dict=True,
             )
