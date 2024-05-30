@@ -1396,6 +1396,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         white_image_index: Optional[list] = None,
         white_image_crossattention: Optional[bool] = True,
         use_onlySAM: Optional[bool] = False,
+        llm_only: Optional[bool] = False,
         image_attention_mask: Optional[torch.LongTensor] = None,
         category_gt: Optional[torch.tensor] = None,
     ) -> Union[Tuple, InstructBlipForConditionalGenerationModelOutput]:
@@ -1579,6 +1580,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             white_decoder_attention_mask = decoder_attention_mask[white_image_index] if decoder_attention_mask is not None else None
             white_labels = labels[white_image_index] if labels is not None else None
             white_sam_feature = sam_feature[white_image_index] if sam_feature is not None else None
+            # white_image_attention_mask = None
             white_image_attention_mask = image_attention_mask[white_image_index] if image_attention_mask is not None else None
             white_category_gt = category_gt[white_image_index] if category_gt is not None else None
             white_inputs_embeds = self.language_model.get_input_embeddings()(white_input_ids).to(image_embeds.device)
@@ -1685,11 +1687,17 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                 last_hidden_state = self.sort_tensor(unsorted_idx.to(nonwhite_vision_outputs["last_hidden_state"].device), torch.cat(((nonwhite_vision_outputs["last_hidden_state"], torch.zeros_like(nonwhite_vision_outputs["last_hidden_state"][:1]).repeat(white_image_index.size(0), 1, 1).to(nonwhite_vision_outputs["last_hidden_state"].device))), dim=0)),
                 pooler_output = self.sort_tensor(unsorted_idx.to(nonwhite_vision_outputs["pooler_output"].device), torch.cat(((nonwhite_vision_outputs["pooler_output"], torch.zeros_like(nonwhite_vision_outputs["pooler_output"][:1]).repeat(white_image_index.size(0), 1).to(nonwhite_vision_outputs["pooler_output"].device))), dim=0))
             )
+            if not llm_only: # qformer
+                query_outputs = BaseModelOutputWithPoolingAndCrossAttentions(
+                    last_hidden_state = self.sort_tensor(unsorted_idx.to(nonwhite_query_outputs["last_hidden_state"].device), torch.cat(((nonwhite_query_outputs["last_hidden_state"], white_query_outputs["last_hidden_state"])), dim=0)),
+                    pooler_output = self.sort_tensor(unsorted_idx.to(nonwhite_query_outputs["pooler_output"].device), torch.cat(((nonwhite_query_outputs["pooler_output"], nonwhite_query_outputs["pooler_output"])), dim=0))
+                )
+            else:
+                query_outputs = BaseModelOutputWithPoolingAndCrossAttentions(
+                    last_hidden_state = self.sort_tensor(unsorted_idx.to(nonwhite_query_outputs["last_hidden_state"].device), torch.cat(((nonwhite_query_outputs["last_hidden_state"], torch.zeros_like(nonwhite_query_outputs["last_hidden_state"][:1]).repeat(white_image_index.size(0), 1, 1).to(nonwhite_query_outputs["last_hidden_state"].device))), dim=0)),
+                    pooler_output = self.sort_tensor(unsorted_idx.to(nonwhite_query_outputs["pooler_output"].device), torch.cat(((nonwhite_query_outputs["pooler_output"], torch.zeros_like(nonwhite_query_outputs["pooler_output"][:1]).repeat(white_image_index.size(0), 1).to(nonwhite_query_outputs["pooler_output"].device))), dim=0))
+                )
 
-            query_outputs = BaseModelOutputWithPoolingAndCrossAttentions(
-                last_hidden_state = self.sort_tensor(unsorted_idx.to(nonwhite_query_outputs["last_hidden_state"].device), torch.cat(((nonwhite_query_outputs["last_hidden_state"], torch.zeros_like(nonwhite_query_outputs["last_hidden_state"][:1]).repeat(white_image_index.size(0), 1, 1).to(nonwhite_query_outputs["last_hidden_state"].device))), dim=0)),
-                pooler_output = self.sort_tensor(unsorted_idx.to(nonwhite_query_outputs["pooler_output"].device), torch.cat(((nonwhite_query_outputs["pooler_output"], torch.zeros_like(nonwhite_query_outputs["pooler_output"][:1]).repeat(white_image_index.size(0), 1).to(nonwhite_query_outputs["pooler_output"].device))), dim=0))
-            )
         elif nonwhite_image_index.size(0) > 0:
             loss = nonwhite_loss
             logits = nonwhite_logits
@@ -1702,17 +1710,30 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             query_outputs = nonwhite_query_outputs
 
         else: # white_image only
-            if not return_dict:
-                output = (white_logits, None, None, white_outputs)
-                return ((white_loss,) + output) if white_loss is not None else output
+            if not llm_only: # use qformer
+                if not return_dict:
+                    output = (white_logits, None, None, white_outputs)
+                    return ((white_loss,) + output) if white_loss is not None else output
             
-            return InstructBlipForConditionalGenerationModelOutput(
-                loss=white_loss,
-                logits=white_logits,
-                vision_outputs=None,
-                qformer_outputs=None,
-                language_model_outputs=white_outputs,
-            )
+                return InstructBlipForConditionalGenerationModelOutput(
+                    loss=white_loss,
+                    logits=white_logits,
+                    vision_outputs=None,
+                    qformer_outputs=white_query_outputs,
+                    language_model_outputs=white_outputs,
+                )
+            else: # llm only
+                if not return_dict:
+                    output = (white_logits, None, None, white_outputs)
+                    return ((white_loss,) + output) if white_loss is not None else output
+            
+                return InstructBlipForConditionalGenerationModelOutput(
+                    loss=white_loss,
+                    logits=white_logits,
+                    vision_outputs=None,
+                    qformer_outputs=None,
+                    language_model_outputs=white_outputs,
+                )
 
         
         outputs = Seq2SeqLMOutput(
@@ -1750,6 +1771,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         white_image_crossattention: Optional[bool] = True,
         use_onlySAM: Optional[bool] = False,
         image_attention_mask: Optional[torch.LongTensor] = None,
+        llm_only: Optional[bool] = False,
         **generate_kwargs,
     ) -> torch.LongTensor:
         """
@@ -1876,9 +1898,8 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             white_qformer_attention_mask = qformer_attention_mask[white_image_index] if qformer_attention_mask is not None else None
             white_input_ids = input_ids[white_image_index] if input_ids is not None else None
             white_attention_mask = attention_mask[white_image_index] if attention_mask is not None else None
-            white_image_attention_mask = image_attention_mask[white_image_index] if image_attention_mask is not None else None
-            white_input_ids = input_ids[white_image_index]
-            white_attention_mask = attention_mask[white_image_index]
+            white_image_attention_mask = None
+            # white_image_attention_mask = image_attention_mask[white_image_index] if image_attention_mask is not None else None
             white_inputs_embeds = self.get_input_embeddings()(white_input_ids).to(image_embeds.device)
 
             if white_image_attention_mask is None:
@@ -1918,7 +1939,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                 white_attention_mask = torch.ones_like(white_input_ids)
             white_attention_mask = torch.cat([white_language_attention_mask, white_attention_mask.to(white_language_attention_mask.device)], dim=1)
             
-            white_inputs_embeds = self.get_input_embeddings()(nonwhite_input_ids)
+            white_inputs_embeds = self.get_input_embeddings()(white_input_ids)
             white_inputs_embeds = torch.cat([white_language_model_inputs, white_inputs_embeds.to(white_language_model_inputs.device)], dim=1)
 
 

@@ -29,7 +29,7 @@ class ModelArguments(PretrainedConfig):
     sam_feat_dim: int=1280
     use_onlySAM: bool=False #vit feature을 쓰는 것이 아닌, sam feature만을 사용해서 qformer에 cross attention시킴 
     white_image_crossattention: bool=True #모델 forward시 qformer가 흰색 이미지일경우 cross attention받을지 말지. 기본은 받는 것
-
+    llm_only: bool=False # white image일 때 false -> qformer text 사용, true -> llm만 사용
     # Additional loss config
     category_classification_loss: bool=False
 
