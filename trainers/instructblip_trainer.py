@@ -12,10 +12,61 @@ from torch.utils.data import Dataset, DataLoader
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 from transformers.utils import logging
 from transformers.trainer_utils import has_length, EvalLoopOutput, EvalPrediction, PredictionOutput, denumpify_detensorize
-from transformers.trainer_pt_utils import EvalLoopContainer, find_batch_size, is_torch_xla_available
+from transformers.trainer_pt_utils import find_batch_size, is_torch_xla_available, EvalLoopContainer
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 
 logger = logging.get_logger(__name__)
+
+# class EvalLoopContainer:
+#     """
+#     Container to store intermediate results of evaluation loop
+
+#     Args:
+#         do_nested_concat (`bool`, *optional*, defaults to `True`):
+#             If set to `True`, each iteration will recursively concatenate a new object containing tensors to
+#             the existing stored tensors, provided that the structure of the existing object and the new one
+#             are identical. If set to `False`, all newly added tensors will be stored in a list.
+#         padding_index (`int`, *optional*, defaults to -100):
+#             Value used to pad tensors of different shapes when `do_nested_concat=True`.
+#     """
+
+#     def __init__(self, do_nested_concat: bool = True, padding_index: int = -100):
+#         self.do_nested_concat = do_nested_concat
+#         self.padding_index = padding_index
+#         self.tensors = None
+#         self.arrays = None
+
+#     def add(self, tensors) -> None:
+#         """Add tensors to the stored objects. If `do_nested_concat=True`, the tensors will be concatenated recursively."""
+#         if self.tensors is None:
+#             self.tensors = tensors if self.do_nested_concat else [tensors]
+#         elif self.do_nested_concat:
+#             self.tensors = nested_concat(self.tensors, tensors, padding_index=self.padding_index)
+#         else:
+#             self.tensors.append(tensors)
+
+#     def to_cpu_and_numpy(self) -> None:
+#         """Move tensors in stored objects to CPU and convert them to numpy arrays."""
+
+#         # Check if we have something to add, if not just return
+#         if self.tensors is None:
+#             return
+
+#         new_arrays = nested_numpify(self.tensors)
+#         if self.arrays is None:
+#             self.arrays = new_arrays
+#         elif self.do_nested_concat:
+#             self.arrays = nested_concat(self.arrays, new_arrays, padding_index=self.padding_index)
+#         else:
+#             self.arrays.extend(new_arrays)
+
+#         # reset device tensors after adding to cpu
+#         self.tensors = None
+
+#     def get_arrays(self):
+#         """Returns the numpified and moved to CPU stored objects."""
+#         self.to_cpu_and_numpy()
+#         return self.arrays
 
 class InstructblipTrainer(Seq2SeqTrainer):
     def __init__(self, **kwargs):
@@ -221,8 +272,6 @@ class InstructblipTrainer(Seq2SeqTrainer):
             main_input_name = getattr(self.model, "main_input_name", "input_ids")
             inputs_decode = self._prepare_input(inputs[main_input_name]) if args.include_inputs_for_metrics else None
 
-            if is_torch_xla_available():
-                xm.mark_step()
 
             # Update containers
             if loss is not None:

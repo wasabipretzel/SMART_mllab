@@ -5,14 +5,28 @@ import json
 
 from PIL import Image
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 import numpy as np
 from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, List
 import transformers
+from transformers import SamModel, SamProcessor, SamImageProcessor
+from torchvision.transforms import Resize  
 
 from utils.util import is_float
+
+"""
+    single instance example of self.qa_info
+
+    {'id': '1', 
+    'Question': 'How many ways are there for the feline to reach the bird if the feline can only move horizontally or vertically towards the bird in the grid?', 
+    'image': 'puzzle_19_e_1.png', 
+    'A': '6', 'B': '13', 'C': '12', 'D': '10', 'E': '9', 
+    'Answer': 'D', 'Note': 'C(5|2)', 
+    'puzzle_id': '19', 'AnswerValue': 10}
+"""
 
 class InstructblipFlant5Dataset(Dataset):
     """
@@ -26,25 +40,34 @@ class InstructblipFlant5Dataset(Dataset):
         self.data_args = data_args
         self.mode = mode
         self.qa_info = self.get_qainfo()
-
         self.generate_option_key()
         self.append_prediction_type() #use for option approximation when prediction type is 'answervalue'
+
+        # for evaluation metric, submission때도 b_pids은 필요해서 있어야 함
+        if mode != "train":
+            self.eval_infos = {
+                "option_values" : [],
+                "answer_type" : [],
+                "pid" : []
+            }
+            for single_qa_pair in self.qa_info:
+                self.eval_infos["option_values"].append(self.get_option_values(single_qa_pair))
+                self.eval_infos["answer_type"].append(single_qa_pair["answer_type"])
+                self.eval_infos["pid"].append(int(single_qa_pair["puzzle_id"]))
 
         if self.data_args.use_caption:
             self.caption_info = self.load_extracted_caption()
         
         if self.data_args.category_classification_mapping_path != None:
             self.puzzle_2_category = self.load_category_mapping()
-        """
-            single instance example of self.qa_info
 
-            {'id': '1', 
-            'Question': 'How many ways are there for the feline to reach the bird if the feline can only move horizontally or vertically towards the bird in the grid?', 
-            'image': 'puzzle_19_e_1.png', 
-            'A': '6', 'B': '13', 'C': '12', 'D': '10', 'E': '9', 
-            'Answer': 'D', 'Note': 'C(5|2)', 
-            'puzzle_id': '19', 'AnswerValue': 10}
-        """
+        if self.data_args.use_dynamic_sam_decoder or self.data_args.use_dynamic_sam_encoder: #TODO : sam-vit-huge ckpt 미리 저장해두기 
+            self.device=f"cuda:{self.data_args.local_rank}"
+            sam_pretrained_model_path = self.data_args.sam_pretrained_model_path if self.data_args.sam_pretrained_model_path is not None else "facebook/sam-vit-huge"
+            self.SAM_image_processor = SamImageProcessor.from_pretrained(sam_pretrained_model_path)
+            self.SAM_model = SamModel.from_pretrained(sam_pretrained_model_path).to(self.device)
+            self.SAM_model.eval()
+
 
     def load_category_mapping(self):
         """
@@ -195,6 +218,72 @@ class InstructblipFlant5Dataset(Dataset):
         except:
             print(f"{image_name}")
         return sam_feat
+
+    def extract_sam_decoder_feat(self, image): #NOTE : device setting
+        """
+            given single loaded and converted to RGB channel image, get decoder dense image feature via pretrained SAM-huge model
+            image will be upscaled to (1024, 1024), then output to [256, 256] feature
+        """
+        points_per_batch=64
+        return_upscaled_embedding=True
+        target_size = self.SAM_image_processor.size["longest_edge"]
+        crop_boxes, grid_points, cropped_images, input_labels = self.SAM_image_processor.generate_crop_boxes(
+            image, target_size
+        )
+        model_inputs = self.SAM_image_processor(images=cropped_images, return_tensors="pt")
+
+        with torch.no_grad():
+            image_embeddings = self.SAM_model.get_image_embeddings(model_inputs.pop("pixel_values").to(self.device))
+            model_inputs["image_embeddings"] = image_embeddings
+            model_inputs["return_upscaled_embedding"] = return_upscaled_embedding
+        
+        n_points = grid_points.shape[1]
+        
+        each_image_attentions= []
+        for i in range(0, n_points, points_per_batch):
+            batched_points = grid_points[:, i : i + points_per_batch, :, :].to(self.device)
+            labels = input_labels[:, i : i + points_per_batch].to(self.device)
+            is_last = i == n_points - points_per_batch 
+
+            each_input = {
+                "input_points" : batched_points,
+                "input_labels" : labels,
+                "input_boxes" : crop_boxes,
+                "is_last" : is_last,
+                **model_inputs,
+            } 
+
+            input_boxes = each_input.pop("input_boxes")
+            is_last = each_input.pop("is_last")
+            original_sizes = each_input.pop("original_sizes").tolist()
+            reshaped_input_sizes = each_input.pop("reshaped_input_sizes").tolist()
+
+            model_outputs = self.SAM_model(**each_input, output_attentions=True)
+            # model upscaled_embeddings : [B, patchnum, query, 65536]
+            # low_res_masks : [1, 64, 3, 256, 256]
+            # mask_decoder_attentions[-1] -> [64, 1, 4096, 256]
+            # 1. [64, 1, 64*64, 256] -> [64, 1, 16*16, 256] -> [1, 1, 16*16, 256] -> 16
+            mask_decoder_attentions = model_outputs["mask_decoder_attentions"][-1].squeeze(1) #[64, 64*64, 256]
+            # [64, 256, 64*64] 가 되도록 permute
+            mask_decoder_attentions = mask_decoder_attentions.permute(0, 2, 1) #[64, 256, 64*64]
+            mask_decoder_attentions = mask_decoder_attentions.reshape(points_per_batch, 256, 64, 64)
+            sequence_pooled_attentions = F.avg_pool2d(mask_decoder_attentions, kernel_size=4, stride=4) #[64, 256, 16, 16]
+            sequence_pooled_attentions = sequence_pooled_attentions.reshape(points_per_batch, 256, -1).permute(0, 2, 1) #[64, 16*16, 256]
+            pooled_attentions = torch.mean(sequence_pooled_attentions, dim=0) #[16*16, 256]
+            each_image_attentions.append(pooled_attentions.detach().cpu())
+        each_image_attentions = torch.stack(each_image_attentions) #[16, 16*16, 256] -> 1024을 64로 나눈것이니..
+        each_image_attentions = torch.mean(each_image_attentions, dim=0) #[256, 256]
+
+        return each_image_attentions
+
+    def extract_sam_encoder_feat(self, image):
+        model_inputs = self.SAM_image_processor(images=image, return_tensors="pt")
+
+        with torch.no_grad():
+            image_embeddings = self.SAM_model.get_image_embeddings(model_inputs.pop("pixel_values").to(self.device))
+            #NOTE need to check the size 
+        return image_embeddings
+
     
     def check_white(self, qa_pair):
         image_path = os.path.join(self.data_args.data_path, qa_pair["puzzle_id"], "img", qa_pair["image"])
@@ -242,6 +331,11 @@ class InstructblipFlant5Dataset(Dataset):
             sam_feature = self.get_sam_feature(single_qa_pair)
         else:
             sam_feature = None
+
+        if self.data_args.use_dynamic_sam_decoder == True:
+            sam_feature = self.extract_sam_decoder_feat(image)
+        elif self.data_args.use_dynamic_sam_encoder == True:
+            sam_feature = self.extract_sam_encoder_feat(image)
 
         if self.data_args.SAM_token_mask:
             image_attention_mask = self.get_token_mask(single_qa_pair)
@@ -365,7 +459,6 @@ class InstructblipFlant5_collator(object):
                 "sam_feature" : b_sam_feature,
                 "white_image_index" : white_image_index,
                 "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else None,
-                "category_gt" : torch.tensor(b_category_gt_num) if b_category_gt_num != None else None 
             } 
         
         return inputs

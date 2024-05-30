@@ -21,7 +21,7 @@ class SubmissionDataset(Dataset):
 
         self.data_args = data_args
         self.mode = mode
-        self.submission_root = "/SMART_mllab/datasets/"
+        self.submission_root = "/dataset/"
         self.image_path = os.path.join(self.submission_root, "test-images")
         self.puzzle_file = "VLAR-val.json" if data_args.challenge_phase == 'val' else 'VLAR-test.json'
         self.qa_info = self.get_qainfo()

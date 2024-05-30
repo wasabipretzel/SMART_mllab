@@ -13,22 +13,16 @@ class ComputeMetricAnswerKey:
 
     tokenizer: transformers.PreTrainedTokenizer
     vicuna_embedding: transformers.PreTrainedModel
-    eval_dataset: torch.utils.data.Dataset
+    eval_infos: dict
     puzzle_path: str
 
     def __post_init__(self):
 
         self.vicuna_embedding=self.vicuna_embedding.weight.clone().detach()
 
-        b_options, b_answer_type, b_pids = [], [], []
-        for i, data in enumerate(self.eval_dataset):
-            b_options.append(data["option_values"])
-            b_answer_type.append(data["answer_type"])
-            b_pids.append(data["pid"])
-        
-        self.b_options = b_options
-        self.b_answer_type = b_answer_type
-        self.b_pids = b_pids
+        self.b_options = self.eval_infos["option_values"]
+        self.b_answer_type = self.eval_infos["answer_type"]
+        self.b_pids = self.eval_infos["pid"]
 
         """
         EvalPrediction(predictions=preds, label_ids=label_ids, inputs=inputs_ids)
@@ -173,22 +167,16 @@ class ComputeMetricAnswerValue:
     
     tokenizer: transformers.PreTrainedTokenizer
     vicuna_embedding: transformers.PreTrainedModel
-    eval_dataset: torch.utils.data.Dataset
+    eval_infos: dict
     puzzle_path: str
 
     def __post_init__(self):
 
         self.vicuna_embedding=self.vicuna_embedding.weight.clone().detach()
 
-        b_options, b_answer_type, b_pids = [], [], []
-        for i, data in enumerate(self.eval_dataset):
-            b_options.append(data["option_values"])
-            b_answer_type.append(data["answer_type"])
-            b_pids.append(data["pid"])
-
-        self.b_options = b_options
-        self.b_answer_type = b_answer_type
-        self.b_pids = b_pids
+        self.b_options = self.eval_infos["option_values"]
+        self.b_answer_type = self.eval_infos["answer_type"]
+        self.b_pids = self.eval_infos["pid"]
 
         """
         EvalPrediction(predictions=preds, label_ids=label_ids, inputs=inputs_ids)

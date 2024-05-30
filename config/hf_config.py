@@ -29,6 +29,7 @@ class ModelArguments(PretrainedConfig):
     sam_feat_dim: int=1280
     use_onlySAM: bool=False #vit feature을 쓰는 것이 아닌, sam feature만을 사용해서 qformer에 cross attention시킴 
     white_image_crossattention: bool=True #모델 forward시 qformer가 흰색 이미지일경우 cross attention받을지 말지. 기본은 받는 것
+    use_dynamic_sam: bool=True
 
     # Additional loss config
     category_classification_loss: bool=False
@@ -69,6 +70,10 @@ class DataArguments:
 
     #for SAM feature
     sam_feature_path: str=field(default=None) #NOTE : 1. 기본은 None sh file에서 지정해줘야함 (dataset 에서 그래야 사용/비사용 구분이 가능) 2. decoder feature 사용시에 path 바꿔줘야함
+    #for SAM dynamic feature
+    sam_pretrained_model_path: str=field(default=None) #/data/pretrained_ckpt/sam-vit-huge
+    use_dynamic_sam_decoder: bool=False
+    use_dynamic_sam_encoder: bool=False
 
     # num_class: int=91
     prediction_type: str=field(default="answerkey") #could be ["answerkey","answervalue"]. answerkey predict one of 'A','B','C','D','E'. answervalue predict float/str value
@@ -77,6 +82,8 @@ class DataArguments:
     # Caption 실험 argument
     use_caption: bool=False #caption 실험 
     caption_path: str="/data/QWEN_caption/Qwen_caption.json"
+    use_dynamic_caption: bool=False
+    qwen_pretrained_model_path: str=field(default=None)
 
     # SAM token mask 실험
     SAM_token_mask: bool=False  

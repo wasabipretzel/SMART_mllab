@@ -68,7 +68,7 @@ class BaseModel(PreTrainedModel):
     
 
         # Linear map for SAM feature 
-        if self.config.use_SAM:
+        if self.config.use_SAM or self.config.use_dynamic_sam:
             self.sam_linear = nn.Linear(self.config.sam_feat_dim, self.VLM.config.vision_config.hidden_size) #1280, 1408
             if config.use_bf16:
                 self.sam_linear.to(torch.bfloat16)
@@ -76,7 +76,7 @@ class BaseModel(PreTrainedModel):
 
 
     def forward(self, return_loss=True, **sample):
-        if self.config.use_SAM:
+        if self.config.use_SAM or self.config.use_dynamic_sam:
             if self.config.use_bf16:
                 sample["sam_feature"] = sample["sam_feature"].to(torch.bfloat16)
             sample["sam_feature"] = self.sam_linear(sample["sam_feature"]) #[B, 256, 1408]
@@ -98,7 +98,7 @@ class BaseModel(PreTrainedModel):
 
     @torch.no_grad()
     def generate(self, **sample):
-        if self.config.use_SAM:
+        if self.config.use_SAM or self.config.use_dynamic_sam:
             if self.config.use_bf16:
                 sample["sam_feature"] = sample["sam_feature"].to(torch.bfloat16)
             sample["sam_feature"] = self.sam_linear(sample["sam_feature"]) #[B, 256, 1408]

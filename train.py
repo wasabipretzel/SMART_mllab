@@ -40,6 +40,7 @@ def train():
     set_seed(training_args.seed)
 
     local_rank = training_args.local_rank
+    data_args.local_rank = local_rank
     if training_args.report_to == ['wandb']:
         os.environ["WANDB_PROJECT"] = training_args.project_name
 
@@ -61,7 +62,7 @@ def train():
     model, processor = get_model(model_args, training_args)
 
     logger.info(f"Trainable model params : {count_parameters(model)}")
-
+    
     # craete dataset & collator
     data_module = get_dataset(model_args, data_args, mode, processor=processor)
 
@@ -70,7 +71,8 @@ def train():
         embeddings = copy.deepcopy(model.VLM.language_model.get_input_embeddings())
     else:
         embeddings= None
-    metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"])
+        
+    metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"].eval_infos)
     trainer = get_trainer(model_args, training_args, model, metric, processor, data_module)
 
     trainer.train()

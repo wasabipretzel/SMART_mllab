@@ -1,7 +1,7 @@
 
 # # DDP run script
-# export CUDA_VISIBLE_DEVICES=0,1,2,3
-# torchrun --nproc_per_node 4 /SMART_mllab/train.py \
+# export CUDA_VISIBLE_DEVICES=2,3
+# torchrun --nproc_per_node 2 --master_port=13212 /SMART_mllab/train.py \
 #     --output_dir /data/ckpt/ \
 #     --prediction_type answerkey \
 #     --category_classification_loss true \
@@ -9,8 +9,8 @@
 #     --model_type instructblip_flant5 \
 #     --pretrained_model_path Salesforce/instructblip-flan-t5-xl \
 #     --num_train_epochs 10 \
-#     --per_device_train_batch_size 32 \
-#     --per_device_eval_batch_size 25 \
+#     --per_device_train_batch_size 16 \
+#     --per_device_eval_batch_size 10 \
 #     --gradient_accumulation_steps 1 \
 #     --evaluation_strategy steps \
 #     --eval_steps 200 \
@@ -24,7 +24,8 @@
 #     --lr_scheduler_type cosine \
 #     --dataloader_num_workers 8 \
 #     --project_name SMART_challenge \
-#     --run_name instructblip_flant5_xl_tokenmask_answerkey_cls_loss \
+#     --ddp_find_unused_parameters false \
+#     --run_name flant5_baseline_xl_AK_clsloss_alldata \
 #     --report_to wandb
 
 
