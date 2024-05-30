@@ -1672,7 +1672,8 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         if white_image_index.size(0) > 0 and nonwhite_image_index.size(0) > 0:
             unsorted_idx = torch.cat((nonwhite_image_index, white_image_index), dim=0)
             loss = nonwhite_loss / pixel_values.size(0) * nonwhite_image_index.size(0) + white_loss / pixel_values.size(0) * white_image_index.size(0)
-            cls_loss = nonwhite_cls_loss / pixel_values.size(0) * nonwhite_image_index.size(0) + white_cls_loss / pixel_values.size(0) * white_image_index.size(0)
+            if category_classification_loss:
+                cls_loss = nonwhite_cls_loss / pixel_values.size(0) * nonwhite_image_index.size(0) + white_cls_loss / pixel_values.size(0) * white_image_index.size(0)
             logits = self.sort_tensor(unsorted_idx, torch.cat((nonwhite_logits, white_logits), dim=0))
         
             assert len(nonwhite_outputs[2]) == len(white_outputs[2]), "the length of nonwhite_outputs[2] and white_outputs[2] are different."
