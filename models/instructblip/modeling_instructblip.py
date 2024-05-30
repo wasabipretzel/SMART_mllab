@@ -76,6 +76,7 @@ class InstructBlipForConditionalGenerationModelOutput(ModelOutput):
     vision_outputs: Optional[torch.FloatTensor] = None
     qformer_outputs: Optional[Tuple[torch.FloatTensor]] = None
     language_model_outputs: Optional[Tuple[torch.FloatTensor]] = None
+    category_loss: Optional[Tuple[torch.FloatTensor]] = None
 
     def to_tuple(self) -> Tuple[Any]:
         return tuple(
@@ -1228,7 +1229,7 @@ class InstructBlipQFormerModel(InstructBlipPreTrainedModel):
 
 
 class CategoryClassfier(nn.Module):
-    def __init__(self, input_size, output_size, hidden_sizes=[128, 32]):
+    def __init__(self, input_size, output_size, hidden_sizes=[512, 128, 32]):
         super(CategoryClassfier, self).__init__()
         # Create a list of all sizes which includes input, hidden, and output layers
         sizes = [input_size] + hidden_sizes + [output_size]
@@ -1281,7 +1282,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             self._keep_in_fp32_modules.extend(language_model._keep_in_fp32_modules)
 
         self.language_model = language_model
-        self.category_cls_head = CategoryClassfier(input_size=self.qformer.config.hidden_size, output_size=8)
+        self.category_cls_head = CategoryClassfier(input_size=config.text_config.hidden_size, output_size=8)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1397,6 +1398,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         white_image_crossattention: Optional[bool] = True,
         use_onlySAM: Optional[bool] = False,
         llm_only: Optional[bool] = False,
+        category_classification_loss: Optional[bool] = False,
         image_attention_mask: Optional[torch.LongTensor] = None,
         category_gt: Optional[torch.tensor] = None,
     ) -> Union[Tuple, InstructBlipForConditionalGenerationModelOutput]:
@@ -1507,14 +1509,15 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             )
             nonwhite_query_output = nonwhite_query_outputs[0][:, : nonwhite_query_tokens.size(1), :]
 
-            # add additional loss
-            # cls_loss = None
-            # if nonwhite_category_gt != None:
-            #     category_hidden_state = self.category_cls_head(torch.mean(nonwhite_query_output, dim=1)) #[B, 8]
-            #     cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
-            #     cls_loss = cls_loss_criterion(category_hidden_state, category_gt)
             # step 3: use the language model, conditioned on the query outputs and the prompt
             nonwhite_language_model_inputs = self.language_projection(nonwhite_query_output)
+            if category_classification_loss:
+                # add additional loss
+                nonwhite_cls_loss = None
+                nonwhite_category_hidden_state = self.category_cls_head(torch.mean(nonwhite_language_model_inputs, dim=1)) #[B, 8]
+                nonwhite_cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
+                nonwhite_cls_loss = nonwhite_cls_loss_criterion(nonwhite_category_hidden_state, nonwhite_category_gt)
+
             nonwhite_language_model_attention_mask = torch.ones(
                 nonwhite_language_model_inputs.size()[:-1], dtype=torch.long, device=nonwhite_language_model_inputs.device
             )
@@ -1563,9 +1566,8 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                 )
                 
                 nonwhite_loss = nonwhite_outputs.loss if return_dict else nonwhite_outputs[0]
-                # cls loss 위치 변경 되면 수정
-                # if cls_loss != None:
-                #     loss += cls_loss
+                if nonwhite_cls_loss != None:
+                    nonwhite_loss += nonwhite_cls_loss
                 nonwhite_logits = nonwhite_outputs.logits if return_dict else nonwhite_outputs[1]
 
         # [2] for white images
@@ -1608,6 +1610,13 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             white_query_output = white_query_outputs[0][:, : white_query_tokens.size(1), :]
 
             white_language_model_inputs = self.language_projection(white_query_output)
+
+            if category_classification_loss:
+                # add additional loss
+                white_cls_loss = None
+                white_category_hidden_state = self.category_cls_head(torch.mean(white_language_model_inputs, dim=1)) #[B, 8]
+                white_cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
+                white_cls_loss = white_cls_loss_criterion(white_category_hidden_state, white_category_gt)
 
             # step 3: use the language model, conditioned on the query outputs and the prompt    
             white_language_model_attention_mask = torch.ones(
@@ -1655,9 +1664,8 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                     labels=white_labels,
                 )
                 white_loss = white_outputs.loss if return_dict else white_outputs[0]
-                # cls loss 위치 변경 되면 수정
-                # if cls_loss != None:
-                #     loss += cls_loss
+                if white_cls_loss != None:
+                    white_loss += white_cls_loss
                 white_logits = white_outputs.logits if return_dict else white_outputs[1]
 
 
@@ -1665,6 +1673,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         if white_image_index.size(0) > 0 and nonwhite_image_index.size(0) > 0:
             unsorted_idx = torch.cat((nonwhite_image_index, white_image_index), dim=0)
             loss = nonwhite_loss / pixel_values.size(0) * nonwhite_image_index.size(0) + white_loss / pixel_values.size(0) * white_image_index.size(0)
+            cls_loss = nonwhite_cls_loss / pixel_values.size(0) * nonwhite_image_index.size(0) + white_cls_loss / pixel_values.size(0) * white_image_index.size(0)
             logits = self.sort_tensor(unsorted_idx, torch.cat((nonwhite_logits, white_logits), dim=0))
         
             assert len(nonwhite_outputs[2]) == len(white_outputs[2]), "the length of nonwhite_outputs[2] and white_outputs[2] are different."
@@ -1747,14 +1756,23 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         if not return_dict:
             output = (logits, vision_outputs, query_outputs, outputs)
             return ((loss,) + output) if loss is not None else output
-
-        return InstructBlipForConditionalGenerationModelOutput(
-            loss=loss,
-            logits=logits,
-            vision_outputs=vision_outputs,
-            qformer_outputs=query_outputs,
-            language_model_outputs=outputs,
-        )
+        if category_classification_loss:
+            return InstructBlipForConditionalGenerationModelOutput(
+                loss=loss,
+                logits=logits,
+                vision_outputs=vision_outputs,
+                qformer_outputs=query_outputs,
+                language_model_outputs=outputs,
+                category_loss = cls_loss
+            )
+        else:
+            return InstructBlipForConditionalGenerationModelOutput(
+                loss=loss,
+                logits=logits,
+                vision_outputs=vision_outputs,
+                qformer_outputs=query_outputs,
+                language_model_outputs=outputs,
+            )
 
 
     @torch.no_grad()
@@ -1771,6 +1789,8 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         white_image_crossattention: Optional[bool] = True,
         use_onlySAM: Optional[bool] = False,
         image_attention_mask: Optional[torch.LongTensor] = None,
+        category_gt: Optional[torch.tensor] = None,
+        category_classification_loss: Optional[bool] = False,
         llm_only: Optional[bool] = False,
         **generate_kwargs,
     ) -> torch.LongTensor:
@@ -1814,7 +1834,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                 nonwhite_attention_mask = attention_mask[nonwhite_image_index] if attention_mask is not None else None
                 nonwhite_sam_feature = sam_feature[nonwhite_image_index] if sam_feature is not None else None
                 nonwhite_image_attention_mask = image_attention_mask[nonwhite_image_index] if image_attention_mask is not None else None
-
+                nonwhite_category_gt = category_gt[nonwhite_image_index] if category_gt is not None else None
                 image_embeds = self.vision_model(nonwhite_pixel_values, return_dict=True).last_hidden_state
                 if sam_feature != None:
                     if use_onlySAM:
@@ -1845,6 +1865,13 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                 nonwhite_query_output = nonwhite_query_outputs.last_hidden_state[:, : nonwhite_query_tokens.size(1), :]
 
                 nonwhite_language_model_inputs = self.language_projection(nonwhite_query_output)
+
+                nonwhite_cls_loss = None
+                if category_classification_loss:
+                    nonwhite_category_hidden_state = self.category_cls_head(torch.mean(nonwhite_language_model_inputs, dim=1)) #[B, 8]
+                    nonwhite_cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
+                    nonwhite_cls_loss = nonwhite_cls_loss_criterion(nonwhite_category_hidden_state, nonwhite_category_gt)
+
                 nonwhite_language_attention_mask = torch.ones(
                     nonwhite_language_model_inputs.size()[:-1], dtype=torch.long, device=nonwhite_language_model_inputs.device
                 )
@@ -1898,9 +1925,9 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             white_qformer_attention_mask = qformer_attention_mask[white_image_index] if qformer_attention_mask is not None else None
             white_input_ids = input_ids[white_image_index] if input_ids is not None else None
             white_attention_mask = attention_mask[white_image_index] if attention_mask is not None else None
-            white_image_attention_mask = None
-            # white_image_attention_mask = image_attention_mask[white_image_index] if image_attention_mask is not None else None
-            white_inputs_embeds = self.get_input_embeddings()(white_input_ids).to(image_embeds.device)
+            nonwhite_category_gt = category_gt[white_image_index] if category_gt is not None else None
+            white_image_attention_mask = image_attention_mask[white_image_index] if image_attention_mask is not None else None
+        
 
             if white_image_attention_mask is None:
                 white_image_attention_mask = torch.ones(white_image_index.size(0), image_embeds.size()[-2], dtype=torch.long, device=image_embeds.device)
@@ -1925,6 +1952,13 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             white_query_output = white_query_outputs.last_hidden_state[:, : white_query_tokens.size(1), :]
 
             white_language_model_inputs = self.language_projection(white_query_output)
+
+            white_cls_loss = None
+                if category_classification_loss:
+                    white_category_hidden_state = self.category_cls_head(torch.mean(white_language_model_inputs, dim=1)) #[B, 8]
+                    white_cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
+                    white_cls_loss = white_cls_loss_criterion(white_category_hidden_state, white_category_gt)
+
             white_language_attention_mask = torch.ones(
                 white_language_model_inputs.size()[:-1], dtype=torch.long, device=white_language_model_inputs.device
             )
@@ -1938,16 +1972,22 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             if white_attention_mask is None:
                 white_attention_mask = torch.ones_like(white_input_ids)
             white_attention_mask = torch.cat([white_language_attention_mask, white_attention_mask.to(white_language_attention_mask.device)], dim=1)
-            
-            white_inputs_embeds = self.get_input_embeddings()(white_input_ids)
-            white_inputs_embeds = torch.cat([white_language_model_inputs, white_inputs_embeds.to(white_language_model_inputs.device)], dim=1)
+            if llm_only:
+                white_inputs_embeds = self.get_input_embeddings()(white_input_ids).to(image_embeds.device)
+
+                if not self.language_model.config.is_encoder_decoder:
+                    generate_kwargs["max_length"] = generate_kwargs.get("max_length", 20)
+                    generate_kwargs["min_length"] = generate_kwargs.get("min_length", 0)
+            else:
+                white_inputs_embeds = self.get_input_embeddings()(white_input_ids)
+                white_inputs_embeds = torch.cat([white_language_model_inputs, white_inputs_embeds.to(white_language_model_inputs.device)], dim=1)
 
 
             # add image_embeds length to max_length, so that the final max_length in counted only on token embeds
             # -1 is to account for the prepended BOS after `generate.`
-            if not self.language_model.config.is_encoder_decoder:
-                generate_kwargs["max_length"] = generate_kwargs.get("max_length", 20) + white_language_model_inputs.shape[1] - 1
-                generate_kwargs["min_length"] = generate_kwargs.get("min_length", 0) + white_language_model_inputs.shape[1]
+                if not self.language_model.config.is_encoder_decoder:
+                    generate_kwargs["max_length"] = generate_kwargs.get("max_length", 20) + white_language_model_inputs.shape[1] - 1
+                    generate_kwargs["min_length"] = generate_kwargs.get("min_length", 0) + white_language_model_inputs.shape[1]
 
             white_outputs = self.language_model.generate(
                 inputs_embeds=white_inputs_embeds,

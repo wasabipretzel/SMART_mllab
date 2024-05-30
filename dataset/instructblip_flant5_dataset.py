@@ -420,6 +420,7 @@ class InstructblipFlant5_collator(object):
                 "sam_feature" : b_sam_feature,
                 "white_image_index" : white_image_index,
                 "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else mask_image_attention if self.data_args.image_mask else None
+                
             } 
         
         return inputs

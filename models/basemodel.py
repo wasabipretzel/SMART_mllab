@@ -83,7 +83,8 @@ class BaseModel(PreTrainedModel):
         
         output = {
             "loss" : result.loss,
-            "logits" : result.logits
+            "logits" : result.logits,
+            "category_loss" : result.category_loss
         }
         
         return output
