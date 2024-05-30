@@ -1511,9 +1511,9 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
 
             # step 3: use the language model, conditioned on the query outputs and the prompt
             nonwhite_language_model_inputs = self.language_projection(nonwhite_query_output)
+            nonwhite_cls_loss = None
             if category_classification_loss:
                 # add additional loss
-                nonwhite_cls_loss = None
                 nonwhite_category_hidden_state = self.category_cls_head(torch.mean(nonwhite_language_model_inputs, dim=1)) #[B, 8]
                 nonwhite_cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
                 nonwhite_cls_loss = nonwhite_cls_loss_criterion(nonwhite_category_hidden_state, nonwhite_category_gt)
@@ -1610,10 +1610,9 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             white_query_output = white_query_outputs[0][:, : white_query_tokens.size(1), :]
 
             white_language_model_inputs = self.language_projection(white_query_output)
-
+            white_cls_loss = None
             if category_classification_loss:
                 # add additional loss
-                white_cls_loss = None
                 white_category_hidden_state = self.category_cls_head(torch.mean(white_language_model_inputs, dim=1)) #[B, 8]
                 white_cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
                 white_cls_loss = white_cls_loss_criterion(white_category_hidden_state, white_category_gt)

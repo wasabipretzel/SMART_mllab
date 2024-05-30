@@ -66,7 +66,7 @@ python /home/work/instructblip/SMART_mllab/train.py \
     --image_mask true \
     --llm_only false \
     --category_classification_loss false \
-    --category_classification_mapping_path /data/category_mapping/puzzle_2_categorynum_mapping.json \
+    --category_classification_mapping_path /home/work/instructblip/data/category_mapping/puzzle_2_categorynum_mapping.json \
     --num_train_epochs 10 \
     --per_device_train_batch_size 32 \
     --per_device_eval_batch_size 20 \
