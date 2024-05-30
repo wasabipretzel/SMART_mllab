@@ -1954,10 +1954,10 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             white_language_model_inputs = self.language_projection(white_query_output)
 
             white_cls_loss = None
-                if category_classification_loss:
-                    white_category_hidden_state = self.category_cls_head(torch.mean(white_language_model_inputs, dim=1)) #[B, 8]
-                    white_cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
-                    white_cls_loss = white_cls_loss_criterion(white_category_hidden_state, white_category_gt)
+            if category_classification_loss:
+                white_category_hidden_state = self.category_cls_head(torch.mean(white_language_model_inputs, dim=1)) #[B, 8]
+                white_cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
+                white_cls_loss = white_cls_loss_criterion(white_category_hidden_state, white_category_gt)
 
             white_language_attention_mask = torch.ones(
                 white_language_model_inputs.size()[:-1], dtype=torch.long, device=white_language_model_inputs.device
