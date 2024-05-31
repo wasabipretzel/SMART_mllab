@@ -1520,15 +1520,13 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             nonwhite_language_model_attention_mask = torch.ones(
                 nonwhite_language_model_inputs.size()[:-1], dtype=torch.long, device=nonwhite_language_model_inputs.device
             )
-            if llm_only:
-                nonwhite_inputs_embeds = self.language_model.get_input_embeddings()(nonwhite_input_ids).to(nonwhite_language_model_inputs.device)
-
-            else:
-                nonwhite_inputs_embeds = self.language_model.get_input_embeddings()(nonwhite_input_ids)
-                nonwhite_inputs_embeds = torch.cat([nonwhite_language_model_inputs, nonwhite_inputs_embeds.to(nonwhite_language_model_inputs.device)], dim=1)
-
+            
             if nonwhite_attention_mask is None:
                 nonwhite_attention_mask = torch.ones_like(nonwhite_input_ids)
+
+            nonwhite_inputs_embeds = self.language_model.get_input_embeddings()(nonwhite_input_ids)
+            nonwhite_inputs_embeds = torch.cat([nonwhite_language_model_inputs, nonwhite_inputs_embeds.to(nonwhite_language_model_inputs.device)], dim=1)
+
             nonwhite_attention_mask = torch.cat([nonwhite_language_model_attention_mask.to(nonwhite_attention_mask.device), nonwhite_attention_mask], dim=1)
             
 
