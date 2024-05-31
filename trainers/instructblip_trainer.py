@@ -481,3 +481,5 @@ class InstructblipTrainerCLS(Seq2SeqTrainer):
                 labels = self._pad_tensors_to_max_len(labels, gen_config.max_new_tokens + 1)
         else:
             labels = None
+
+        return loss, category_loss, generated_tokens, labels

@@ -1520,7 +1520,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             nonwhite_language_model_attention_mask = torch.ones(
                 nonwhite_language_model_inputs.size()[:-1], dtype=torch.long, device=nonwhite_language_model_inputs.device
             )
-            
+
             if nonwhite_attention_mask is None:
                 nonwhite_attention_mask = torch.ones_like(nonwhite_input_ids)
 
@@ -1566,8 +1566,6 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                 )
                 
                 nonwhite_loss = nonwhite_outputs.loss if return_dict else nonwhite_outputs[0]
-                if nonwhite_cls_loss != None:
-                    nonwhite_loss += nonwhite_cls_loss
                 nonwhite_logits = nonwhite_outputs.logits if return_dict else nonwhite_outputs[1]
 
         # [2] for white images
@@ -1664,8 +1662,6 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                     labels=white_labels,
                 )
                 white_loss = white_outputs.loss if return_dict else white_outputs[0]
-                if white_cls_loss != None:
-                    white_loss += white_cls_loss
                 white_logits = white_outputs.logits if return_dict else white_outputs[1]
 
 
@@ -1712,7 +1708,9 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         elif nonwhite_image_index.size(0) > 0:
             loss = nonwhite_loss
             logits = nonwhite_logits
-        
+            if category_classification_loss:
+                cls_loss = nonwhite_cls_loss
+
             past_key_values = nonwhite_outputs[2]
             
             encoder_last_hidden_state =  nonwhite_outputs[3]
@@ -1726,26 +1724,47 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                     output = (white_logits, None, None, white_outputs)
                     return ((white_loss,) + output) if white_loss is not None else output
             
-                return InstructBlipForConditionalGenerationModelOutput(
-                    loss=white_loss,
-                    logits=white_logits,
-                    vision_outputs=None,
-                    qformer_outputs=white_query_outputs,
-                    language_model_outputs=white_outputs,
-                )
+                if category_classification_loss:
+                    cls_loss = white_cls_loss
+                    return InstructBlipForConditionalGenerationModelOutput(
+                        loss=white_loss,
+                        logits=white_logits,
+                        vision_outputs=None,
+                        qformer_outputs=white_query_outputs,
+                        language_model_outputs=white_outputs,
+                        category_loss = cls_loss
+                    )
+                else:
+                    return InstructBlipForConditionalGenerationModelOutput(
+                        loss=white_loss,
+                        logits=white_logits,
+                        vision_outputs=None,
+                        qformer_outputs=white_query_outputs,
+                        language_model_outputs=white_outputs,
+                    )
             else: # llm only
                 if not return_dict:
                     output = (white_logits, None, None, white_outputs)
                     return ((white_loss,) + output) if white_loss is not None else output
             
-                return InstructBlipForConditionalGenerationModelOutput(
-                    loss=white_loss,
-                    logits=white_logits,
-                    vision_outputs=None,
-                    qformer_outputs=None,
-                    language_model_outputs=white_outputs,
-                )
-
+                if category_classification_loss:
+                    cls_loss = white_cls_loss
+                    return InstructBlipForConditionalGenerationModelOutput(
+                        loss=white_loss,
+                        logits=white_logits,
+                        vision_outputs=None,
+                        qformer_outputs=None,
+                        language_model_outputs=white_outputs,
+                        category_loss = cls_loss
+                    )
+                else:
+                    return InstructBlipForConditionalGenerationModelOutput(
+                        loss=white_loss,
+                        logits=white_logits,
+                        vision_outputs=None,
+                        qformer_outputs=None,
+                        language_model_outputs=white_outputs,
+                    )
         
         outputs = Seq2SeqLMOutput(
             loss = loss,
@@ -2016,6 +2035,13 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                     white_outputs = torch.cat([white_bos_tokens, white_outputs], dim=-1)
 
         # [3] sort and concat
+        cls_loss = None
+        if white_image_index.size(0) > 0 and nonwhite_image_index.size(0) > 0:
+            unsorted_idx = torch.cat((nonwhite_image_index, white_image_index), dim=0)
+            loss = nonwhite_loss / pixel_values.size(0) * nonwhite_image_index.size(0) + white_loss / pixel_values.size(0) * white_image_index.size(0)
+            if category_classification_loss:
+                cls_loss = nonwhite_cls_loss / pixel_values.size(0) * nonwhite_image_index.size(0) + white_cls_loss / pixel_values.size(0) * white_image_index.size(0)
+
         if nonwhite_outputs is not None and white_outputs is not None:
             unsorted_idx = torch.cat((nonwhite_image_index, white_image_index), dim=0)
             outputs = self.sort_tensor(unsorted_idx, torch.cat((nonwhite_outputs, white_outputs), dim=0))
