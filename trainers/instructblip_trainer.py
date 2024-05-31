@@ -13,6 +13,8 @@ from transformers.trainer_utils import has_length, EvalLoopOutput, EvalPredictio
 from transformers.trainer_pt_utils import EvalLoopContainer, find_batch_size, is_torch_xla_available
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 
+logger = logging.get_logger(__name__)
+
 class InstructblipTrainer(Seq2SeqTrainer):
 
     def create_optimizer(self):
