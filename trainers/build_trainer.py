@@ -1,4 +1,4 @@
-from trainers.instructblip_trainer import InstructblipTrainer
+from trainers.instructblip_trainer import InstructblipTrainer, InstructblipTrainerCLS
 from transformers import Seq2SeqTrainer
 
 
