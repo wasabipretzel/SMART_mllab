@@ -65,7 +65,7 @@ python /home/work/instructblip/SMART_mllab/train.py \
     --pretrained_model_path Salesforce/instructblip-flan-t5-xl \
     --image_mask true \
     --llm_only false \
-    --category_classification_loss false \
+    --category_classification_loss true \
     --category_classification_mapping_path /home/work/instructblip/data/category_mapping/puzzle_2_categorynum_mapping.json \
     --num_train_epochs 10 \
     --per_device_train_batch_size 32 \
@@ -83,7 +83,7 @@ python /home/work/instructblip/SMART_mllab/train.py \
     --lr_scheduler_type cosine \
     --dataloader_num_workers 4 \
     --project_name SMART_challenge \
-    --run_name instructblip_image_masking_branch_llm_qformer \
+    --run_name instructblip_image_masking_branch_llm_qformer_cls_loss \
     --report_to wandb
 
 

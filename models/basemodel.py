@@ -77,15 +77,25 @@ class BaseModel(PreTrainedModel):
             sample["white_image_crossattention"] = False
         if self.config.use_onlySAM:
             sample["use_onlySAM"] = True
+        if self.config.llm_only:
+            sample["llm_only"] = True
+        if self.config.category_classification_loss:
+            sample["category_classification_loss"] = True
         result = self.VLM(
             **sample
         ) #['loss', 'logits', 'vision_outputs', 'qformer_outputs', 'language_model_outputs']
         
-        output = {
-            "loss" : result.loss,
-            "logits" : result.logits,
-            "category_loss" : result.category_loss
-        }
+        if self.config.category_classification_loss:
+            output = {
+                "loss" : result.loss,
+                "logits" : result.logits,
+                "category_loss" : result.category_loss
+            }
+        else:
+            output = {
+                "loss" : result.loss,
+                "logits" : result.logits,
+            }
         
         return output
 
@@ -99,6 +109,10 @@ class BaseModel(PreTrainedModel):
             sample["white_image_crossattention"] = False
         if self.config.use_onlySAM:
             sample["use_onlySAM"] = True
+        if self.config.llm_only:
+            sample["llm_only"] = True
+        if self.config.category_classification_loss:
+            sample["category_classification_loss"] = True
         result = self.VLM.generate(
             **sample,
             #generation_kwargs : if no parameters, -> greedy search

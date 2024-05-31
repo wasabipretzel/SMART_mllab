@@ -1465,7 +1465,6 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             nonwhite_sam_feature = sam_feature[nonwhite_image_index] if sam_feature is not None else None
             nonwhite_image_attention_mask = image_attention_mask[nonwhite_image_index] if image_attention_mask is not None else None
             nonwhite_category_gt = category_gt[nonwhite_image_index] if category_gt is not None else None
-
             # step 1: forward the images through the vision encoder,
             # to get image embeddings of shape (batch_size, seq_len, hidden_size) 
             nonwhite_vision_outputs = self.vision_model(
@@ -1521,9 +1520,12 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             nonwhite_language_model_attention_mask = torch.ones(
                 nonwhite_language_model_inputs.size()[:-1], dtype=torch.long, device=nonwhite_language_model_inputs.device
             )
-            nonwhite_inputs_embeds = self.language_model.get_input_embeddings()(nonwhite_input_ids)
+            if llm_only:
+                nonwhite_inputs_embeds = self.language_model.get_input_embeddings()(nonwhite_input_ids).to(nonwhite_language_model_inputs.device)
 
-            nonwhite_inputs_embeds = torch.cat([nonwhite_language_model_inputs, nonwhite_inputs_embeds.to(nonwhite_language_model_inputs.device)], dim=1)
+            else:
+                nonwhite_inputs_embeds = self.language_model.get_input_embeddings()(nonwhite_input_ids)
+                nonwhite_inputs_embeds = torch.cat([nonwhite_language_model_inputs, nonwhite_inputs_embeds.to(nonwhite_language_model_inputs.device)], dim=1)
 
             if nonwhite_attention_mask is None:
                 nonwhite_attention_mask = torch.ones_like(nonwhite_input_ids)
@@ -1621,13 +1623,14 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             white_language_model_attention_mask = torch.ones(
                 white_language_model_inputs.size()[:-1], dtype=torch.long, device=white_language_model_inputs.device
             )
-            white_inputs_embeds = self.language_model.get_input_embeddings()(white_input_ids)
-
-            white_inputs_embeds = torch.cat([white_language_model_inputs, white_inputs_embeds.to(white_language_model_inputs.device)], dim=1)
-
             if white_attention_mask is None:
-                white_attention_mask = torch.ones_like(white_input_ids)
-            white_attention_mask = torch.cat([white_language_model_attention_mask.to(white_attention_mask.device), white_attention_mask], dim=1)
+                    white_attention_mask = torch.ones_like(white_input_ids)
+            if llm_only:
+                white_inputs_embeds = self.language_model.get_input_embeddings()(white_input_ids).to(white_language_model_inputs.device)
+            else:
+                white_inputs_embeds = self.language_model.get_input_embeddings()(white_input_ids)
+                white_inputs_embeds = torch.cat([white_language_model_inputs, white_inputs_embeds.to(white_language_model_inputs.device)], dim=1)
+                white_attention_mask = torch.cat([white_language_model_attention_mask.to(white_attention_mask.device), white_attention_mask], dim=1)
     
             if self.config.use_decoder_only_language_model:
                 white_outputs = self.language_model(
@@ -1669,6 +1672,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
 
 
         # [3] concat and sort
+        cls_loss = None
         if white_image_index.size(0) > 0 and nonwhite_image_index.size(0) > 0:
             unsorted_idx = torch.cat((nonwhite_image_index, white_image_index), dim=0)
             loss = nonwhite_loss / pixel_values.size(0) * nonwhite_image_index.size(0) + white_loss / pixel_values.size(0) * white_image_index.size(0)
@@ -1812,6 +1816,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         Returns:
             captions (list): A list of strings of length batch_size * num_captions.
         """
+
         nonwhite_outputs, white_outputs = None, None
         if hasattr(self, "hf_device_map"):
             # preprocess for `accelerate`
@@ -1925,9 +1930,9 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             white_qformer_attention_mask = qformer_attention_mask[white_image_index] if qformer_attention_mask is not None else None
             white_input_ids = input_ids[white_image_index] if input_ids is not None else None
             white_attention_mask = attention_mask[white_image_index] if attention_mask is not None else None
-            nonwhite_category_gt = category_gt[white_image_index] if category_gt is not None else None
-            white_image_attention_mask = image_attention_mask[white_image_index] if image_attention_mask is not None else None
-        
+            white_category_gt = category_gt[white_image_index] if category_gt is not None else None
+            # white_image_attention_mask = image_attention_mask[white_image_index] if image_attention_mask is not None else None
+            white_image_attention_mask = None
 
             if white_image_attention_mask is None:
                 white_image_attention_mask = torch.ones(white_image_index.size(0), image_embeds.size()[-2], dtype=torch.long, device=image_embeds.device)
