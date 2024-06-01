@@ -1961,27 +1961,6 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             if white_qformer_attention_mask is None:
                 white_qformer_attention_mask = torch.ones_like(white_qformer_input_ids)
             white_qformer_attention_mask = torch.cat([white_query_attention_mask, white_qformer_attention_mask], dim=1)
-            white_query_outputs = self.qformer(
-                input_ids=white_qformer_input_ids,
-                attention_mask=white_qformer_attention_mask,
-                query_embeds=white_query_tokens,
-                encoder_hidden_states=torch.ones(white_image_index.size(0), image_embeds.size(1), image_embeds.size(2), dtype=torch.bfloat16).to(image_embeds.device),
-                encoder_attention_mask=white_image_attention_mask,
-                return_dict=True,
-            )
-            white_query_output = white_query_outputs.last_hidden_state[:, : white_query_tokens.size(1), :]
-
-            white_language_model_inputs = self.language_projection(white_query_output)
-
-            white_cls_loss = None
-            if category_classification_loss:
-                white_category_hidden_state = self.category_cls_head(torch.mean(white_language_model_inputs, dim=1)) #[B, 8]
-                white_cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
-                white_cls_loss = white_cls_loss_criterion(white_category_hidden_state, white_category_gt)
-
-            white_language_attention_mask = torch.ones(
-                white_language_model_inputs.size()[:-1], dtype=torch.long, device=white_language_model_inputs.device
-            )
 
             if white_input_ids is None:
                 white_input_ids = (
@@ -1999,6 +1978,28 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                     generate_kwargs["max_length"] = generate_kwargs.get("max_length", 20)
                     generate_kwargs["min_length"] = generate_kwargs.get("min_length", 0)
             else:
+                white_query_outputs = self.qformer(
+                    input_ids=white_qformer_input_ids,
+                    attention_mask=white_qformer_attention_mask,
+                    query_embeds=white_query_tokens,
+                    encoder_hidden_states=torch.ones(white_image_index.size(0), image_embeds.size(1), image_embeds.size(2), dtype=torch.bfloat16).to(image_embeds.device),
+                    encoder_attention_mask=white_image_attention_mask,
+                    return_dict=True,
+                )
+                white_query_output = white_query_outputs.last_hidden_state[:, : white_query_tokens.size(1), :]
+
+                white_language_model_inputs = self.language_projection(white_query_output)
+
+                white_cls_loss = None
+                if category_classification_loss:
+                    white_category_hidden_state = self.category_cls_head(torch.mean(white_language_model_inputs, dim=1)) #[B, 8]
+                    white_cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
+                    white_cls_loss = white_cls_loss_criterion(white_category_hidden_state, white_category_gt)
+
+                white_language_attention_mask = torch.ones(
+                    white_language_model_inputs.size()[:-1], dtype=torch.long, device=white_language_model_inputs.device
+                )
+
                 white_inputs_embeds = self.get_input_embeddings()(white_input_ids)
                 white_inputs_embeds = torch.cat([white_language_model_inputs, white_inputs_embeds.to(white_language_model_inputs.device)], dim=1)
                 white_attention_mask = torch.cat([white_language_attention_mask, white_attention_mask.to(white_language_attention_mask.device)], dim=1)
