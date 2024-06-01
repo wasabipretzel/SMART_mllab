@@ -482,4 +482,4 @@ class InstructblipTrainerCLS(Seq2SeqTrainer):
         else:
             labels = None
 
-        return loss, category_loss, generated_tokens, labels
+        

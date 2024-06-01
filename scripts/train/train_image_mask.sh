@@ -64,8 +64,8 @@ python /home/work/instructblip/SMART_mllab/train.py \
     --model_type instructblip_flant5 \
     --pretrained_model_path Salesforce/instructblip-flan-t5-xl \
     --image_mask true \
-    --llm_only false \
-    --category_classification_loss true \
+    --llm_only true \
+    --category_classification_loss false \
     --category_classification_mapping_path /home/work/instructblip/data/category_mapping/puzzle_2_categorynum_mapping.json \
     --num_train_epochs 10 \
     --per_device_train_batch_size 32 \
