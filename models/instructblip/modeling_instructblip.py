@@ -1993,7 +1993,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
                 )
             if white_attention_mask is None:
                 white_attention_mask = torch.ones_like(white_input_ids)
-            white_attention_mask = torch.cat([white_language_attention_mask, white_attention_mask.to(white_language_attention_mask.device)], dim=1)
+            
             if llm_only:
                 white_inputs_embeds = self.get_input_embeddings()(white_input_ids).to(image_embeds.device)
 
@@ -2003,7 +2003,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             else:
                 white_inputs_embeds = self.get_input_embeddings()(white_input_ids)
                 white_inputs_embeds = torch.cat([white_language_model_inputs, white_inputs_embeds.to(white_language_model_inputs.device)], dim=1)
-
+                white_attention_mask = torch.cat([white_language_attention_mask, white_attention_mask.to(white_language_attention_mask.device)], dim=1)
 
             # add image_embeds length to max_length, so that the final max_length in counted only on token embeds
             # -1 is to account for the prepended BOS after `generate.`
