@@ -5,7 +5,8 @@ from datasets import load_metric
 import torch
 from torch.nn import CosineSimilarity
 import numpy as np
-
+import random
+import re
 from utils.util import is_float, read_dataset_info
 
 @dataclass
@@ -71,6 +72,7 @@ class ComputeMetricAnswerKey:
 
         pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
         pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
+
         #위의 값들이 detach되어있는지 확인할 것
         # tokenizing 시 맨 앞 bos token안붙히게 할 것
         self.tokenizer.add_bos_token=False
@@ -225,6 +227,7 @@ class ComputeMetricAnswerValue:
         pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
         pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
         
+        
         #위의 값들이 detach되어있는지 확인할 것
         # tokenizing 시 맨 앞 bos token안붙히게 할 것
         self.tokenizer.add_bos_token=False
@@ -277,9 +280,194 @@ class ComputeMetricAnswerValue:
                 approximated_pred.append(result)
         
         assert len(approximated_pred) == len(pred_answer_list) == pred.predictions.shape[0]
+        #calculate s_acc/o_acc & puzzle_id 
+        tot_samples_num = pred.predictions.shape[0] # 6300 지워도됨
+        puzzle_acc = {}
+        for t in list(set(self.b_pids)):
+            puzzle_acc[str(t)] = [
+                np.array(non_approximated_pred)[np.array(self.b_pids) == t].sum(),
+                np.array(approximated_pred)[np.array(self.b_pids) == t].sum(),
+                (np.array(self.b_pids) == t).sum()
+            ]
+
+        to_int = lambda x: np.array(list(x)).astype("int")
+        cls_mean = lambda x, idx, pids: np.array([x[int(ii)] for ii in idx]).sum() / len(
+            set(to_int(idx)).intersection(set(to_int(pids)))
+        )
+        acc_list = np.zeros(101+1)
+        opt_acc_list = np.zeros(101+1)
+        for puzzle_id in puzzle_acc.keys():
+            acc = 100.0 * puzzle_acc[puzzle_id][0] / puzzle_acc[puzzle_id][2]
+            oacc = 100.0 * puzzle_acc[puzzle_id][1] / puzzle_acc[puzzle_id][2]
+            acc_list[int(puzzle_id)] = acc
+            opt_acc_list[int(puzzle_id)] = oacc
+        #print acc, opt_acc by puzzle id
+        for t in range(1, 101+1):
+            print("%d opt_acc(%%)=%0.2f acc(%%)=%0.2f" % (t, opt_acc_list[t], acc_list[t]), end="\t")
+            if t % 5 == 0:
+                print("\n")
+        print("\n\n")
+        class_avg_perf = {}
+        classes = ["counting", "math", "logic", "path", "algebra", "measure", "spatial", "pattern"]
+        print(classes)
+        for each_class in classes:
+            idx_list = self.puzzles[each_class]
+            class_avg_perf[each_class] = (
+                cls_mean(acc_list, idx_list, list(puzzle_acc.keys())),
+                cls_mean(opt_acc_list, idx_list, list(puzzle_acc.keys())),
+            )
+            print("%0.1f/%0.1f & " % (class_avg_perf[each_class][0], class_avg_perf[each_class][1]), end=" ")
+        print("\n\n")
+
+        metrics = {
+            "S_acc" : np.array(non_approximated_pred).sum()*100 / tot_samples_num,
+            "O_acc" : np.array(approximated_pred).sum()*100 / tot_samples_num
+        }
+        #result에 class별 s_acc / o_acc append 혹은 update 
+        for each_class in classes:
+            metrics[f"{each_class}_acc"] = class_avg_perf[each_class][0]
+            metrics[f"{each_class}_oacc"] = class_avg_perf[each_class][1]
+
+        #원상복구
+        self.tokenizer.add_bos_token=True
+
+        return metrics
+
+    
+    def make_submission_json(self):
+        return
+
+
+
+@dataclass
+class ComputeMetricAnswerAll:
+    
+    tokenizer: transformers.PreTrainedTokenizer
+    vicuna_embedding: transformers.PreTrainedModel
+    eval_dataset: torch.utils.data.Dataset
+    puzzle_path: str
+
+    def __post_init__(self):
+
+        self.vicuna_embedding=self.vicuna_embedding.weight.clone().detach()
+
+        b_options, b_answer_type, b_pids = [], [], []
+        for i, data in enumerate(self.eval_dataset):
+            b_options.append(data["option_values"])
+            b_answer_type.append(data["answer_type"])
+            b_pids.append(data["pid"])
+
+        self.b_options = b_options
+        self.b_answer_type = b_answer_type
+        self.b_pids = b_pids
+
+        """
+        EvalPrediction(predictions=preds, label_ids=label_ids, inputs=inputs_ids)
+            get all logits, labels after all eval_step
+        pred.predictions (얘가 맞는듯) (300, 182)
+        pred.label_ids  (얜 죄다 -100) (300, 124)
+            predictions (`np.ndarray`): Predictions of the model.
+            label_ids (`np.ndarray`): Targets to be matched.
+        tokenizer을 넣어줘야하는듯. 
+        """
+        self.candidates = ["A","B","C","D","E"]
+        self.cossim = CosineSimilarity(dim=1)
+        self.puzzles = read_dataset_info(self.puzzle_path) #TODO remove hard coding
+    # method
+    # 1. pred 같이 밀어올리는 부분은 self.qa_info의 answer type, options(option들의 값), pids 
+    # 2. pred.predictions을 pad_token_id제외하고 batch_decode
+    # 3. answer_list만들고 for문돌면서 float가능한지 아니면 str로 분류해야하는지 판단
+    # 4. (1) 만약 pred값이랑 answer value랑 같아 -> s_acc을 위해 cache.
+    #    (2) 다른 경우 : 만약 problem도 float고 pred도 float면 distance기반 option approximate
+    #    (3) problem이랑 상관없이 pred가 string이면 embedding approximate
+    #    (4) argmax해서 가장 유사한 답안으로 pred을 다시 만들기 
+    # 5. pred값으로 s_acc구하고 o_acc도 구하기 + puzzle별로 + class별로도 구하기 
+
+    # cf) puzzle metric, 등등을 위해 csv 읽어서 올려야함 
+    def compute_metrics(self, pred):
+        #b_options : nested list of [test_samples, 5]
+        #b_answer_type : List[str] (len:num test samples)
+        #b_pids : List[str] (len: num test samples)
+        #method 1
+        #method 2
+
+        pred.label_ids[pred.label_ids == -100] = self.tokenizer.pad_token_id #fill -100 index with pad_token_id (preventing index/overflow error)
+        gt_answer_list = self.tokenizer.batch_decode(pred.label_ids, skip_special_tokens=True) #get rid of pad tokens
+
+        pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
+        pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
+
+
+        gt_option_list = []
+        gt_value_list = []
+        pred_option_list = []
+        pred_value_list = []
+
+        for i in range(len(gt_answer_list)):
+            gt_option, gt_value = gt_answer_list[i].split(" : ")
+            gt_option_list.append(gt_option)
+            gt_value_list.append(gt_value)
+
+            if pred_answer_list[i][0] in self.candidates: #해당 인덱스의 첫번째 문자가 candidates에 있다면
+                pred_option = pred_answer_list[i][0]
+                pred_value = pred_answer_list[i][1:] #뒤를 전부 value로 사용
+            else:
+                pred_option = "F" #옵션을 줄 수 없다면 F부여
+                pred_value = pred_answer_list[i] #나머진 모두 Value로 이동
+
+
+            pred_value = re.sub(r"^\s*[:\s]*|\s*$", "", pred_value) #콜론 공백등 있을 수 있으니 후처리
+            pred_option_list.append(pred_option)
+
+           
+
+            if pred_value != "":
+                pred_value_list.append(pred_value)
+            else:
+                pred_value_list.append(pred_option)
+        
+        # 채워야할것 approximated_pred와 non_approximated_pred    
+        approximated_pred = [] #근사 후 정답
+        non_approximated_pred =[] #근사 전 정답
+
+
+        replaced_pred_list = [random.choice(self.candidates) if pred == 'F' else pred for pred in pred_option_list] #F라면 랜덤으로 옵션 부여
+
+        non_approximated_pred = [pred == gt for pred, gt in zip(pred_option_list, gt_option_list)] #정답 비교
+                
+
+        for i in range(len(pred_value_list)):
+            if pred_value_list[i].isdigit():
+                # 숫자 비교 (차이가 가장 적은 옵션 선택)
+                option_value = self.b_options[i]
+                float_pred = float(pred_value_list[i])
+                float_options = [opt if isinstance(opt, (int, float)) else 999 for opt in option_value] # 숫자가 아니면 999 할당
+                closest_option_index = np.argmin(np.abs(np.array(float_options) - float_pred))
+                most_similar_option = self.candidates[closest_option_index]
+            else:
+                # 문자열 임베딩 비교 (가장 유사한 옵션 선택)
+                option_value = self.b_options[i]
+                option_value = [str(opt_val) for opt_val in option_value] # 옵션 값을 문자열로 변환
+                option_tokenized = self.tokenizer(text=option_value, padding=True, truncation=False, return_tensors="pt").input_ids.long()
+                option_embedded = self.vicuna_embedding[option_tokenized].mean(axis=1)
+                pred_tokenized = self.tokenizer(text=pred_value_list[i], padding=True, truncation=False, return_tensors="pt").input_ids.long()
+                pred_embedded = self.vicuna_embedding[pred_tokenized].mean(axis=1)
+                most_similar_option_index = self.cossim(option_embedded, pred_embedded).argmax(dim=0)
+                most_similar_option = self.candidates[most_similar_option_index]
+            
+            # 여기서 most_similar_option을 활용하여 필요한 작업 수행
+            if pred_option_list[i] == most_similar_option:
+                pass
+            else:
+                if random.random() <= 1:  # 90% 확률로 실행 Stochastic하게 적용 그래도 value에 중요성을 준 느낌
+                #100프로로도 해본다.
+                    pred_option_list[i] = most_similar_option
+
+
+        approximated_pred = [pred == gt for pred, gt in zip(pred_option_list, gt_option_list)] #정답 비교
 
         #calculate s_acc/o_acc & puzzle_id 
-        tot_samples_num = pred.predictions.shape[0]
+        tot_samples_num = len(pred_option_list) # 6300 지워도됨
         puzzle_acc = {}
         for t in list(set(self.b_pids)):
             puzzle_acc[str(t)] = [

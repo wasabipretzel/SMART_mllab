@@ -30,17 +30,23 @@
 
 # # single gpu run script
 export PATH=$PATH:path/to/HIP/bin
-export CUDA_VISIBLE_DEVICES=0
-python train.py \
+export CUDA_VISIBLE_DEVICES=0,1
+torchrun --nproc_per_node 2 train.py \
     --output_dir /home/work/SMART101/data/ckpt/ \
     --prediction_type answerall \
+    --use_caption false \
     --category_classification_loss false \
     --category_classification_mapping_path /home/work/SMART101/data/category_mapping/puzzle_2_categorynum_mapping.json \
     --model_type instructblip_flant5 \
+    --use_SAM true \
+    --use_onlySAM false \
+    --sam_feat_dim 256 \
+    --sam_feature_path /home/work/SMART101/features/SAM_features/decoder_features/last_hidden_feat \
     --pretrained_model_path Salesforce/instructblip-flan-t5-xl \
+    --caption_path /home/work/SMART101/data/QWEN_caption/Qwen_caption.json \
     --num_train_epochs 10 \
-    --per_device_train_batch_size 32 \
-    --per_device_eval_batch_size 20 \
+    --per_device_train_batch_size 16 \
+    --per_device_eval_batch_size 10 \
     --gradient_accumulation_steps 1 \
     --evaluation_strategy steps \
     --eval_steps 200 \
@@ -52,10 +58,10 @@ python train.py \
     --warmup_ratio 0.1 \
     --logging_steps 1 \
     --lr_scheduler_type cosine \
-    --dataloader_num_workers 4 \
+    --dataloader_num_workers 8 \
     --project_name SMART_challenge \
-    --run_name answerpluskey_new_loss_1_false \
     --image_mask false \
+    --run_name answerpluskey_new_loss_0.9_false_sam \
     --report_to wandb
 
 

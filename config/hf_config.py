@@ -63,9 +63,9 @@ class ModelArguments(PretrainedConfig):
 @dataclass
 class DataArguments:
     split_type: str="PS"
-    split_path: str="/data/split"
-    data_path: str="/data/SMART101-release-v1/SMART101-Data"
-    puzzle_path: str="/data/SMART101-release-v1/puzzle_type_info.csv"
+    split_path: str="/home/work/SMART101/data/split"
+    data_path: str="/home/work/SMART101/data/SMART101-release-v1/SMART101-Data"
+    puzzle_path: str="/home/work/SMART101/data/SMART101-release-v1/puzzle_type_info.csv"
 
     #for SAM feature
     sam_feature_path: str=field(default=None) #NOTE : 1. 기본은 None sh file에서 지정해줘야함 (dataset 에서 그래야 사용/비사용 구분이 가능) 2. decoder feature 사용시에 path 바꿔줘야함
@@ -76,12 +76,16 @@ class DataArguments:
 
     # Caption 실험 argument
     use_caption: bool=False #caption 실험 
-    caption_path: str="/data/QWEN_caption/Qwen_caption.json"
+    caption_path: str="/home/work/SMART101/data/QWEN_caption/Qwen_caption.json"
 
     # SAM token mask 실험
     SAM_token_mask: bool=False  
     token_mask_path: str="/data/SAM_features/decoder_features/token_mask_features"
     
+    # image mask 실험
+    image_mask: bool=False
+    patch_size: int=14
+
     # category classification loss
     # category_classification_mapping_path = "/data/category_mapping/puzzle_2_categorynum_mapping.json"
     category_classification_mapping_path: str=field(default=None)

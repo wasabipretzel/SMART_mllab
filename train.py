@@ -70,6 +70,11 @@ def train():
         embeddings = copy.deepcopy(model.VLM.language_model.get_input_embeddings())
     else:
         embeddings= None
+
+
+
+
+    # metric = get_metric(model_args, data_args, processor, embeddings, subset2)
     metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"])
     trainer = get_trainer(model_args, training_args, model, metric, processor, data_module)
 

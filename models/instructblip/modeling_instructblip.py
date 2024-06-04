@@ -13,6 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ PyTorch InstructBLIP model."""
+import random
+import re
+import numpy as np
+
+from transformers import InstructBlipProcessor, InstructBlipForConditionalGeneration
+
 
 import math
 from dataclasses import dataclass
@@ -1153,7 +1159,6 @@ class InstructBlipQFormerModel(InstructBlipPreTrainedModel):
         )
 
         query_length = query_embeds.shape[1] if query_embeds is not None else 0
-
         embedding_output = self.embeddings(
             input_ids=input_ids,
             position_ids=position_ids,
@@ -1268,6 +1273,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         self.qformer = InstructBlipQFormerModel(config.qformer_config)
 
         self.language_projection = nn.Linear(config.qformer_config.hidden_size, config.text_config.hidden_size)
+        self.processor = InstructBlipProcessor.from_pretrained("Salesforce/instructblip-flan-t5-xl")
 
         if config.use_decoder_only_language_model:
             language_model = AutoModelForCausalLM.from_config(config.text_config)
@@ -1281,7 +1287,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             self._keep_in_fp32_modules.extend(language_model._keep_in_fp32_modules)
 
         self.language_model = language_model
-        self.category_cls_head = CategoryClassfier(input_size=config.text_config.hidden_size, output_size=8)
+        # self.category_cls_head = CategoryClassfier(input_size=config.text_config.hidden_size, output_size=8)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1421,6 +1427,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             if len(white_image_index) != 0:
                 image_attention_mask[white_image_index] = 0 # mask out white image when cross attention
 
+
         # difference with BLIP-2 here: we also feed the instruction prompt to the Q-Former
         query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
         query_attention_mask = torch.ones(query_tokens.size()[:-1], dtype=torch.long, device=image_embeds.device)
@@ -1440,13 +1447,18 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         query_output = query_outputs[0][:, : query_tokens.size(1), :]
         # step 3: use the language model, conditioned on the query outputs and the prompt
         language_model_inputs = self.language_projection(query_output)
+        
+
+
+
+
+        
         # add additional loss
         cls_loss = None
-        if category_gt != None:
-            category_hidden_state = self.category_cls_head(torch.mean(language_model_inputs, dim=1)) #[B, 8]
-            cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
-            cls_loss = cls_loss_criterion(category_hidden_state, category_gt)
-
+        # if category_gt != None:
+        #     category_hidden_state = self.category_cls_head(torch.mean(language_model_inputs, dim=1)) #[B, 8]
+        #     cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
+        #     cls_loss = cls_loss_criterion(category_hidden_state, category_gt)
         language_model_attention_mask = torch.ones(
             language_model_inputs.size()[:-1], dtype=torch.long, device=language_model_inputs.device
         )
@@ -1481,7 +1493,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
 
                 loss = loss_fct(shift_logits.view(-1, self.config.text_config.vocab_size), shift_labels.view(-1))
         else:
-            outputs = self.language_model(
+            outputs = self.language_model (#모델 로스 확인 필요
                 inputs_embeds=inputs_embeds,
                 attention_mask=attention_mask,
                 decoder_input_ids=decoder_input_ids,
@@ -1493,7 +1505,38 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             )
             loss = outputs.loss if return_dict else outputs[0]
             logits = outputs.logits if return_dict else outputs[1]
+            # breakpoint()
 
+            # #logits과 labels만 가지고 다시 loss를 내보자
+            # #추가로스...
+            # # 각 토큰 마다 다른 가중치를 주면 될 것 같음.
+            # #라벨은 항상 [A, 공백, :, 이후 중요 , 덜중요] = [309(중요), 3, 10(약간중요), 중요~... , 안중요] 유연하게 중요도를 줘보자
+            # weight_matrix = [2] * labels.size(1)
+            # weight_matrix[-1] = 0.001 #맨 뒤는 대체로 안중요함
+            # weight_matrix[0] = 1 #옵션은 중요하니까 1의 중요도
+
+            # weight_matrix[1] = 0.1 #옵션과 : 사이의 공백
+            # weight_matrix[2] = 0.1 #: 콜론
+
+
+            # # # 이것은 ㅁ-ㅁ 형태일때 가중치
+            # weight_matrix[-1] = 0.001
+
+
+
+            # # # 가중치 행렬을 텐서로 변환
+            # weight_tensor = torch.tensor(weight_matrix, dtype=torch.float).to(outputs.logits.device)
+            # # CrossEntropyLoss 함수 정의
+            # loss_fct = CrossEntropyLoss(ignore_index=-100, reduction='none')  # reduction='none'으로 각 토큰별 loss 계산
+            # loss_by_token_flat = loss_fct(outputs.logits.view(-1, outputs.logits.size(-1)), labels.view(-1))
+            # loss_by_token = loss_by_token_flat.view(outputs.logits.size(0), outputs.logits.size(1)) #32, 토큰 수로 사이즈 변경
+            # # 가중치 적용
+            # weighted_loss_by_token = loss_by_token * weight_tensor.unsqueeze(0)
+            # # 최종 loss 계산
+            # loss = weighted_loss_by_token.mean()
+
+        
+        
         if not return_dict:
             output = (logits, vision_outputs, query_outputs, outputs)
             return ((loss,) + output) if loss is not None else Output
