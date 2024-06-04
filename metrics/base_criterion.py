@@ -65,6 +65,13 @@ class ComputeMetricAnswerKey:
 
         pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
         pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
+
+        if pred.category_predictions != None:
+            correct_category_preds = pred.category_predictions.sum().item() #[True, False ...]
+            category_accuracy = correct_category_preds / pred.category_predictions.shape[0]
+        else:
+            category_accuracy=None
+            
         #위의 값들이 detach되어있는지 확인할 것
         # tokenizing 시 맨 앞 bos token안붙히게 할 것
         self.tokenizer.add_bos_token=False
@@ -142,14 +149,15 @@ class ComputeMetricAnswerKey:
 
         metrics = {
             "S_acc" : np.array(non_approximated_pred).sum()*100 / tot_samples_num,
-            "O_acc" : np.array(approximated_pred).sum()*100 / tot_samples_num
+            "O_acc" : np.array(approximated_pred).sum()*100 / tot_samples_num,
         }
         #result에 class별 s_acc / o_acc append 혹은 update 
         for each_class in classes:
             metrics[f"{each_class}_acc"] = class_avg_perf[each_class][0]
             metrics[f"{each_class}_oacc"] = class_avg_perf[each_class][1]
 
-
+        #category acc
+        metrics[f"category_acc"] = category_accuracy
         #TODO : 위에서 맞춘것 제대로 돌아가면 submission json형태로도 만들어야함 
         # ("A", "B" .. 이런식으로 approximate된것을 다시 string으로 바꿔서 내보내야함 -> class method function으로생성하게끔하자
 
@@ -212,6 +220,12 @@ class ComputeMetricAnswerValue:
 
         pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
         pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
+
+        if pred.category_predictions != None:
+            correct_category_preds = pred.category_predictions.sum().item() #[True, False ...]
+            category_accuracy = correct_category_preds / pred.category_predictions.shape[0]
+        else:
+            category_accuracy=None
         
         #위의 값들이 detach되어있는지 확인할 것
         # tokenizing 시 맨 앞 bos token안붙히게 할 것
@@ -313,6 +327,9 @@ class ComputeMetricAnswerValue:
         for each_class in classes:
             metrics[f"{each_class}_acc"] = class_avg_perf[each_class][0]
             metrics[f"{each_class}_oacc"] = class_avg_perf[each_class][1]
+    
+        #category acc
+        metrics[f"category_acc"] = category_accuracy
 
         #원상복구
         self.tokenizer.add_bos_token=True

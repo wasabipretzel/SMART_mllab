@@ -7,6 +7,7 @@ from transformers import PretrainedConfig, GenerationConfig
 
 from models.basemodel import BaseModel
 from models.instructblip.processing_instructblip import InstructBlipProcessor
+from models.cls_model import VisualClassifier
 
 from models.smart_basemodel import SMART_Net
 
@@ -57,6 +58,19 @@ def get_model(model_args, training_args):
             assert set(msg.missing_keys) == {"fc.weight", "fc.bias"}
         
         model = SMART_Net(vision_model)
+    elif model_args.model_type == "visual_classifier":
+        if training_args.load_ckpt_path == None:
+            model_args.train_mode = True
+            processor = InstructBlipProcessor.from_pretrained(model_args.pretrained_model_path)
+            model = VisualClassifier(model_args).to(training_args.device)
+        else:
+            processor = InstructBlipProcessor.from_pretrained(model_args.pretrained_model_path)
+            model_config = PretrainedConfig.from_pretrained(training_args.load_ckpt_path)
+            model_config.train_mode=False
+            model = VisualClassifier.from_pretrained(
+                pretrained_model_name_or_path=training_args.load_ckpt_path,
+                config=model_config,
+            ).to(training_args.device)
     else:
         raise NotImplementedError
 

@@ -66,7 +66,10 @@ class BaseModel(PreTrainedModel):
 
             self.VLM.language_model = get_peft_model(self.VLM.language_model, lora_config)
     
-
+        # self.config.use_SAM=False
+        # self.config.use_dynamic_sam=False
+        # self.config.white_image_crossattention=False
+        # self.config.use_onlySAM=False
         # Linear map for SAM feature 
         if self.config.use_SAM or self.config.use_dynamic_sam:
             self.sam_linear = nn.Linear(self.config.sam_feat_dim, self.VLM.config.vision_config.hidden_size) #1280, 1408
@@ -91,7 +94,8 @@ class BaseModel(PreTrainedModel):
         output = {
             "loss" : result.loss,
             "logits" : result.logits,
-            "category_loss" : result.category_loss
+            "category_loss" : result.category_loss,
+            "category_predictions" : result.category_predictions,
         }
         
         return output

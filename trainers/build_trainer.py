@@ -1,4 +1,5 @@
 from trainers.instructblip_trainer import InstructblipTrainer
+from trainers.category_cls_trainer import CategoryClsTrainer
 from transformers import Seq2SeqTrainer
 
 
@@ -16,6 +17,14 @@ def get_trainer(model_args, training_args, model, metric, processor, data_module
                     model=model,
                     args=training_args,
                     compute_metrics=metric.compute_metrics,
+                    **data_module
+                )
+    elif model_args.model_type == "visual_classifier":
+        trainer = CategoryClsTrainer(
+                    model=model,
+                    args=training_args,
+                    compute_metrics=metric.compute_metrics,
+                    tokenizer=processor.tokenizer,
                     **data_module
                 )
     else:

@@ -72,7 +72,7 @@ def inference():
     data_module = get_dataset(model_args, data_args, mode, processor=processor)
 
     embeddings = copy.deepcopy(model.VLM.language_model.get_input_embeddings())
-    metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"])
+    metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"].eval_infos)
 
     trainer = Seq2SeqTrainer(model=model,
                     args=training_args,

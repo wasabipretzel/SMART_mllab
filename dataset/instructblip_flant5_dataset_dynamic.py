@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, List
 import transformers
 from transformers import SamModel, SamProcessor, SamImageProcessor
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.generation import GenerationConfig
 from torchvision.transforms import Resize  
 
 from utils.util import is_float
@@ -28,7 +30,7 @@ from utils.util import is_float
     'puzzle_id': '19', 'AnswerValue': 10}
 """
 
-class InstructblipFlant5Dataset(Dataset):
+class InstructblipFlant5DynamicDataset(Dataset):
     """
         single image를 읽고 processing해서 올린다 (instructblip processor어디서 동작하는지 찾아볼것)
         question and answer 밀어올리는 방식은 
@@ -60,15 +62,26 @@ class InstructblipFlant5Dataset(Dataset):
         
         if self.data_args.category_classification_mapping_path != None:
             self.puzzle_2_category = self.load_category_mapping()
-
-        if self.data_args.use_dynamic_sam_decoder or self.data_args.use_dynamic_sam_encoder: #TODO : sam-vit-huge ckpt 미리 저장해두기 
-            self.device=f"cuda:{self.data_args.local_rank}"
-            sam_pretrained_model_path = self.data_args.sam_pretrained_model_path if self.data_args.sam_pretrained_model_path is not None else "facebook/sam-vit-huge"
-            self.SAM_image_processor = SamImageProcessor.from_pretrained(sam_pretrained_model_path)
-            self.SAM_model = SamModel.from_pretrained(sam_pretrained_model_path).to(self.device)
-            self.SAM_model.eval()
-
-
+        
+        if mode == 'train':
+            if self.data_args.use_dynamic_sam_decoder or self.data_args.use_dynamic_sam_encoder: #TODO : sam-vit-huge ckpt 미리 저장해두기 
+                self.device=f"cuda:{self.data_args.local_rank}"
+                sam_pretrained_model_path = self.data_args.sam_pretrained_model_path if self.data_args.sam_pretrained_model_path is not None else "facebook/sam-vit-huge"
+                self.SAM_image_processor = SamImageProcessor.from_pretrained(sam_pretrained_model_path)
+                self.SAM_model = SamModel.from_pretrained(sam_pretrained_model_path).to(self.device)
+                self.SAM_model.eval()
+            
+            #=======================================준혁===============================================
+            if self.data_args.use_dynamic_caption: 
+                qwen_pretrained_model_path = self.data_args.qwen_pretrained_model_path if self.data_args.qwen_pretrained_model_path is not None else "Qwen/Qwen-VL-Chat"
+                self.Qwen_tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path=qwen_pretrained_model_path, trust_remote_code=True)
+                self.Qwen = AutoModelForCausalLM.from_pretrained(pretrained_model_name_or_path=qwen_pretrained_model_path, trust_remote_code=True, bf16=True).to(self.device)
+                self.Qwen.eval()
+                self.Qwen.generation_config = GenerationConfig.from_pretrained(qwen_pretrained_model_path, trust_remote_code=True)
+                #prompt
+                self.vqa_prompt = f'Looking at this image, propose 3 question-answer pairs. The questions and answers should be based on the visual, locational information. Use only english.' 
+                self.caption_prompt = f'Please create a description that includes both a detailed explanation of the image and a visual element. Use only English.'
+                
     def load_category_mapping(self):
         """
             {   "puzzle_id (str) " : category num (0~7)
@@ -125,14 +138,7 @@ class InstructblipFlant5Dataset(Dataset):
         """
             load all QA pair & image metadata
         """
-        if self.mode == "train":
-            if self.data_args.use_train_legacy:
-                data_path = os.path.join(self.data_args.split_path, self.data_args.split_type, self.mode+'_legacy.pkl')
-            else:
-                data_path = os.path.join(self.data_args.split_path, self.data_args.split_type, self.mode+'.pkl')
-        else:
-            data_path = os.path.join(self.data_args.split_path, self.data_args.split_type, self.mode+'.pkl')
-
+        data_path = os.path.join(self.data_args.split_path, self.data_args.split_type, self.mode+'.pkl')
         with open(data_path, 'rb') as f:
             qa_info = pkl.load(f)
         return qa_info
@@ -155,45 +161,25 @@ class InstructblipFlant5Dataset(Dataset):
     def get_input_text(self, qa_pair):
         #process input text -> this function can be developed for instruction tuning etc
         if self.data_args.prediction_type == 'answerkey':
-            # prompt = "Please read the following question, select the correct answer from one of the options.\n"
-            prompt = "Please read the following question, select the correct answer from one of the options."
+            prompt = "Please read the following question, select the correct answer from one of the options.\n"
         elif self.data_args.prediction_type == 'answervalue':
-            # prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value.\n"
-            prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value."
+            prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value.\n"
         else:
             raise NotImplementedError
 
-        # question = "Question : " + qa_pair["Question"] + '\n' + 'Options : ' + qa_pair["options"] + "\n" + "Answer : "
-        question = "Question : " + qa_pair["Question"] + 'Options : ' + qa_pair["options"] + ". Answer : "
+        question = "Question : " + qa_pair["Question"] + '\n' + 'Options : ' + qa_pair["options"] + "\n" + "Answer : "
 
         if self.data_args.use_caption:
             image_name = qa_pair["image"]
             caption_value = self.caption_info[image_name]["caption"]
-            # if len(caption_value.split()) <= self.caption_threshold:
-            #     caption = "Caption : " + caption_value+'\n'
-            # else:
-            #     caption_value = " ".join(caption_value.split()[:self.caption_threshold])
-            #     caption = "Caption : " + caption_value+'\n'
             caption = "Caption : " + caption_value+'\n'
             input_text= prompt + caption + question
+        elif self.data_args.use_dynamic_caption: #=======================================준혁===============================================
+            caption = "Caption : " + self.single_caption + '\n'
+            input_text = prompt + caption + question
         else:
             input_text = prompt + question # cdddddaptddddddddionddddd
 
-        return input_text
-
-    def get_qformer_input_text(self, qa_pair):
-        #process input text -> this function can be developed for instruction tuning etc
-        if self.data_args.prediction_type == 'answerkey':
-            prompt = "Please read the following question, select the correct answer from one of the options.\n"
-            # prompt = "Please read the following question, select the correct answer from one of the options."
-        elif self.data_args.prediction_type == 'answervalue':
-            prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value.\n"
-            # prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value."
-        else:
-            raise NotImplementedError
-
-        question = "Question : " + qa_pair["Question"]
-        input_text = prompt + question
         return input_text
 
     def get_output_text(self, qa_pair):
@@ -252,6 +238,8 @@ class InstructblipFlant5Dataset(Dataset):
         points_per_batch=64
         return_upscaled_embedding=True
         target_size = self.SAM_image_processor.size["longest_edge"]
+        resize = Resize(224)
+        image = resize(image)
         crop_boxes, grid_points, cropped_images, input_labels = self.SAM_image_processor.generate_crop_boxes(
             image, target_size
         )
@@ -282,8 +270,8 @@ class InstructblipFlant5Dataset(Dataset):
             is_last = each_input.pop("is_last")
             original_sizes = each_input.pop("original_sizes").tolist()
             reshaped_input_sizes = each_input.pop("reshaped_input_sizes").tolist()
-
-            model_outputs = self.SAM_model(**each_input, output_attentions=True)
+            with torch.no_grad():
+                model_outputs = self.SAM_model(**each_input, output_attentions=True)
             # model upscaled_embeddings : [B, patchnum, query, 65536]
             # low_res_masks : [1, 64, 3, 256, 256]
             # mask_decoder_attentions[-1] -> [64, 1, 4096, 256]
@@ -308,6 +296,26 @@ class InstructblipFlant5Dataset(Dataset):
             image_embeddings = self.SAM_model.get_image_embeddings(model_inputs.pop("pixel_values").to(self.device))
             #NOTE need to check the size 
         return image_embeddings
+
+    #=======================================준혁===============================================
+    def make_vqa_and_caption(self, qa_pair):
+        image_path = os.path.join(self.data_args.data_path, qa_pair["puzzle_id"], "img", qa_pair["image"])
+        question = qa_pair['Question']
+        vqa_query = self.Qwen_tokenizer.from_list_format([
+            {'image':image_path},
+            {'text':self.vqa_prompt}
+            ])
+        caption_query = self.Qwen_tokenizer.from_list_format([
+            {'image':image_path},
+            {'text':self.caption_prompt}
+            ])
+        with torch.no_grad():
+            vqa_response, vqa_history = self.Qwen.chat(self.Qwen_tokenizer, query=vqa_query, history=None)
+            vqa_response = vqa_response.encode('ascii', 'ignore').decode('ascii')
+            caption_response, caption_history = self.Qwen.chat(self.Qwen_tokenizer, query=caption_query, history=vqa_history)
+            caption_response = caption_response.encode('ascii', 'ignore').decode('ascii')
+
+        return vqa_response, caption_response
 
     
     def check_white(self, qa_pair):
@@ -346,9 +354,12 @@ class InstructblipFlant5Dataset(Dataset):
     def __getitem__(self, idx):
         single_qa_pair = self.qa_info[idx]
         image = self.load_image(single_qa_pair)
+        #=======================================준혁===============================================
+        if self.data_args.use_dynamic_caption: #NOTE : dynamic caption뽑는 부분이 text_input 만들기 전에 있어야 이를 활용함
+            self.single_vqa, self.single_caption = self.make_vqa_and_caption(single_qa_pair)
+            
         text_input = self.get_input_text(single_qa_pair)
         text_output = self.get_output_text(single_qa_pair) 
-        # qformer_input_text = self.get_qformer_input_text(single_qa_pair)
         pid = int(single_qa_pair["puzzle_id"])
         option_values = self.get_option_values(single_qa_pair)
 
@@ -377,7 +388,6 @@ class InstructblipFlant5Dataset(Dataset):
 
             # for qformer instruction input
             'question' : single_qa_pair["Question"],
-            # "qformer_input_text" : qformer_input_text,
 
             # for different collator action
             'mode' : self.mode, 
@@ -400,7 +410,7 @@ class InstructblipFlant5Dataset(Dataset):
         return data
 
 @dataclass
-class InstructblipFlant5_collator(object):
+class InstructblipFlant5Dynamic_collator(object):
     """Collate examples for supervised fine-tuning."""
     """
         flant5의 경우, input : text, output : text + eos token만 붙히면 나머지는 t5안에서 처리를 해준다. 
@@ -424,7 +434,6 @@ class InstructblipFlant5_collator(object):
             #qformer input
             b_pixel_values.append(each_batch["pixel_values"]) 
             b_qformer_text_input.append(each_batch["question"])
-            # b_qformer_text_input.append(each_batch["qformer_input_text"])
             #llm I/O
             b_text_input.append(each_batch["text_input"])
             b_text_output.append(each_batch["text_output"])
@@ -436,7 +445,6 @@ class InstructblipFlant5_collator(object):
                 token_mask_image_attention.append(each_batch["image_attention_mask"])
             if self.data_args.category_classification_mapping_path != None:
                 b_category_gt_num.append(each_batch["category_num"])
-
 
         #qformer input
         image_input = self.processor(images=b_pixel_values, return_tensors='pt')
@@ -487,7 +495,6 @@ class InstructblipFlant5_collator(object):
                 "sam_feature" : b_sam_feature,
                 "white_image_index" : white_image_index,
                 "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else None,
-                "category_gt" : torch.tensor(b_category_gt_num) if b_category_gt_num != None else None,
             } 
         
         return inputs

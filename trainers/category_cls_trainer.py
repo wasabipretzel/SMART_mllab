@@ -5,14 +5,14 @@
 from typing import Dict
 
 import numpy as np
-from transformers import Seq2SeqTrainer
+from transformers import Seq2SeqTrainer, Trainer
 import torch 
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
-from transformers.utils import logging
+from transformers.utils import logging, is_sagemaker_mp_enabled
 from transformers.trainer_utils import has_length, EvalLoopOutput, EvalPrediction, PredictionOutput, denumpify_detensorize
-from transformers.trainer_pt_utils import find_batch_size, is_torch_xla_available, EvalLoopContainer
+from transformers.trainer_pt_utils import find_batch_size, is_torch_xla_available, EvalLoopContainer, nested_detach
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 
 logger = logging.get_logger(__name__)
@@ -65,7 +65,7 @@ class EvalPrediction:
         elif idx == 3:
             return self.category_predictions
 
-class InstructblipTrainer(Seq2SeqTrainer):
+class CategoryClsTrainer(Trainer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -112,7 +112,7 @@ class InstructblipTrainer(Seq2SeqTrainer):
             if cls_loss is not None:
                 loss += cls_loss
         else:
-            cls_loss = None
+            cls_loss=None
         # Log the separate losses
         # self.log({'main_loss': outputs.loss.item()})
         if cls_loss is not None:
@@ -269,7 +269,7 @@ class InstructblipTrainer(Seq2SeqTrainer):
                     batch_size = observed_batch_size
 
             # Prediction step
-            loss, category_loss, logits, labels, category_predictions = self.prediction_step(model, inputs, prediction_loss_only, ignore_keys=ignore_keys)
+            loss, logits, labels, category_predictions = self.prediction_step(model, inputs, prediction_loss_only, ignore_keys=ignore_keys)
             main_input_name = getattr(self.model, "main_input_name", "input_ids")
             inputs_decode = self._prepare_input(inputs[main_input_name]) if args.include_inputs_for_metrics else None
 
@@ -278,9 +278,6 @@ class InstructblipTrainer(Seq2SeqTrainer):
             if loss is not None:
                 losses = self.gather_function((loss.repeat(batch_size)))
                 all_losses.add(losses)
-            if category_loss is not None:
-                category_losses = self.gather_function((category_loss.repeat(batch_size)))
-                all_category_losses.add(category_losses)
             if inputs_decode is not None:
                 inputs_decode = self.accelerator.pad_across_processes(inputs_decode, dim=1, pad_index=-100)
                 inputs_decode = self.gather_function((inputs_decode))
@@ -304,7 +301,6 @@ class InstructblipTrainer(Seq2SeqTrainer):
             # Gather all tensors and put them back on the CPU if we have done enough accumulation steps.
             if args.eval_accumulation_steps is not None and (step + 1) % args.eval_accumulation_steps == 0:
                 all_losses.to_cpu_and_numpy()
-                all_category_losses.to_cpu_and_numpy()
                 all_preds.to_cpu_and_numpy()
                 all_labels.to_cpu_and_numpy()
                 all_inputs.to_cpu_and_numpy()
@@ -318,7 +314,6 @@ class InstructblipTrainer(Seq2SeqTrainer):
 
         # Gather all remaining tensors and put them back on the CPU
         all_losses = all_losses.get_arrays()
-        all_category_losses = all_category_losses.get_arrays()
         all_preds = all_preds.get_arrays()
         all_labels = all_labels.get_arrays()
         all_inputs = all_inputs.get_arrays()
@@ -357,11 +352,6 @@ class InstructblipTrainer(Seq2SeqTrainer):
         elif isinstance(all_losses, np.ndarray):
             metrics[f"{metric_key_prefix}_loss"] = all_losses.mean().item()
 
-        if isinstance(all_category_losses, list) and all_category_losses and category_loss is not None:
-            metrics[f"{metric_key_prefix}_category_loss"] = np.concatenate(all_category_losses).mean().item()
-        elif isinstance(all_category_losses, np.ndarray) and category_loss is not None:
-            metrics[f"{metric_key_prefix}_category_loss"] = all_category_losses.mean().item()
-
         if category_predictions is not None:
             metrics[f"{metric_key_prefix}_category_acc"] = metrics["category_acc"] #NOTE 이거 맞나..?
 
@@ -382,8 +372,7 @@ class InstructblipTrainer(Seq2SeqTrainer):
         inputs: Dict[str, Union[torch.Tensor, Any]],
         prediction_loss_only: bool,
         ignore_keys: Optional[List[str]] = None,
-        **gen_kwargs,
-    ) -> Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]:
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
         """
         Perform an evaluation step on `model` using `inputs`.
 
@@ -399,88 +388,85 @@ class InstructblipTrainer(Seq2SeqTrainer):
                 argument `labels`. Check your model's documentation for all accepted arguments.
             prediction_loss_only (`bool`):
                 Whether or not to return the loss only.
-            gen_kwargs:
-                Additional `generate` specific kwargs.
+            ignore_keys (`List[str]`, *optional*):
+                A list of keys in the output of your model (if it is a dictionary) that should be ignored when
+                gathering predictions.
 
         Return:
-            Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]: A tuple with the loss, logits and
-            labels (each being optional).
+            Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]: A tuple with the loss,
+            logits and labels (each being optional).
         """
+        has_labels = False if len(self.label_names) == 0 else all(inputs.get(k) is not None for k in self.label_names)
+        # For CLIP-like models capable of returning loss values.
+        # If `return_loss` is not specified or being `None` in `inputs`, we check if the default value of `return_loss`
+        # is `True` in `model.forward`.
+        return_loss = inputs.get("return_loss", None)
+        if return_loss is None:
+            return_loss = self.can_return_loss
+        loss_without_labels = True if len(self.label_names) == 0 and return_loss else False
 
-        if not self.args.predict_with_generate or prediction_loss_only:
-            return super().prediction_step(
-                model, inputs, prediction_loss_only=prediction_loss_only, ignore_keys=ignore_keys
-            )
-
-        has_labels = "labels" in inputs
         inputs = self._prepare_inputs(inputs)
-
-        # Priority (handled in generate):
-        # non-`None` gen_kwargs > model.generation_config > default GenerationConfig()
-        if len(gen_kwargs) == 0 and hasattr(self, "_gen_kwargs"):
-            gen_kwargs = self._gen_kwargs.copy()
-        if "num_beams" in gen_kwargs and gen_kwargs["num_beams"] is None:
-            gen_kwargs.pop("num_beams")
-        if "max_length" in gen_kwargs and gen_kwargs["max_length"] is None:
-            gen_kwargs.pop("max_length")
-
-        default_synced_gpus = True if is_deepspeed_zero3_enabled() else False
-        gen_kwargs["synced_gpus"] = (
-            gen_kwargs["synced_gpus"] if gen_kwargs.get("synced_gpus") is not None else default_synced_gpus
-        )
-
-        generation_inputs = inputs.copy()
-        # If the `decoder_input_ids` was created from `labels`, evict the former, so that the model can freely generate
-        # (otherwise, it would continue generating from the padded `decoder_input_ids`)
-        if (
-            "labels" in generation_inputs
-            and "decoder_input_ids" in generation_inputs
-            and generation_inputs["labels"].shape == generation_inputs["decoder_input_ids"].shape
-        ):
-            generation_inputs = {
-                k: v for k, v in inputs.items() if k not in ("decoder_input_ids", "decoder_attention_mask")
-            }
-        generated_tokens = self.model.generate(**generation_inputs, **gen_kwargs)
-
-        # Temporary hack to ensure the generation config is not initialized for each iteration of the evaluation loop
-        # TODO: remove this hack when the legacy code that initializes generation_config from a model config is
-        # removed in https://github.com/huggingface/transformers/blob/98d88b23f54e5a23e741833f1e973fdf600cc2c5/src/transformers/generation/utils.py#L1183
-        if self.model.generation_config._from_model_config:
-            self.model.generation_config._from_model_config = False
-
-        # Retrieves GenerationConfig from model.generation_config
-        gen_config = self.model.generation_config
-        # in case the batch is shorter than max length, the output should be padded
-        if generated_tokens.shape[-1] < gen_config.max_length:
-            generated_tokens = self._pad_tensors_to_max_len(generated_tokens, gen_config.max_length)
-        elif gen_config.max_new_tokens is not None and generated_tokens.shape[-1] < gen_config.max_new_tokens + 1:
-            generated_tokens = self._pad_tensors_to_max_len(generated_tokens, gen_config.max_new_tokens + 1)
-
-        with torch.no_grad():
-            if has_labels:
-                with self.compute_loss_context_manager():
-                    outputs = model(**inputs)
-                if self.label_smoother is not None:
-                    loss = self.label_smoother(outputs, inputs["labels"]).mean().detach()
-                else:
-                    loss = (outputs["loss"] if isinstance(outputs, dict) else outputs[0]).mean().detach()
-                    if outputs["category_loss"] != None:
-                        category_loss = (outputs["category_loss"]).mean().detach()
-                    else:
-                        category_loss = None
+        if ignore_keys is None:
+            if hasattr(self.model, "config"):
+                ignore_keys = getattr(self.model.config, "keys_to_ignore_at_inference", [])
             else:
-                loss = None
+                ignore_keys = []
 
-        if self.args.prediction_loss_only:
-            return loss, None, None
-
-        if has_labels:
-            labels = inputs["labels"]
-            if labels.shape[-1] < gen_config.max_length:
-                labels = self._pad_tensors_to_max_len(labels, gen_config.max_length)
-            elif gen_config.max_new_tokens is not None and labels.shape[-1] < gen_config.max_new_tokens + 1:
-                labels = self._pad_tensors_to_max_len(labels, gen_config.max_new_tokens + 1)
+        # labels may be popped when computing the loss (label smoothing for instance) so we grab them first.
+        if has_labels or loss_without_labels:
+            labels = nested_detach(tuple(inputs.get(name) for name in self.label_names))
+            if len(labels) == 1:
+                labels = labels[0]
         else:
             labels = None
 
-        return loss, category_loss, generated_tokens, labels, outputs["category_predictions"]
+        with torch.no_grad():
+            if is_sagemaker_mp_enabled():
+                raw_outputs = smp_forward_only(model, inputs)
+                if has_labels or loss_without_labels:
+                    if isinstance(raw_outputs, dict):
+                        loss_mb = raw_outputs["loss"]
+                        logits_mb = tuple(v for k, v in raw_outputs.items() if k not in ignore_keys + ["loss"])
+                    else:
+                        loss_mb = raw_outputs[0]
+                        logits_mb = raw_outputs[1:]
+
+                    loss = loss_mb.reduce_mean().detach().cpu()
+                    logits = smp_nested_concat(logits_mb)
+                else:
+                    loss = None
+                    if isinstance(raw_outputs, dict):
+                        logits_mb = tuple(v for k, v in raw_outputs.items() if k not in ignore_keys)
+                    else:
+                        logits_mb = raw_outputs
+                    logits = smp_nested_concat(logits_mb)
+            else:
+                if has_labels or loss_without_labels:
+                    with self.compute_loss_context_manager():
+                        loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
+                    loss = loss.mean().detach()
+
+                    if isinstance(outputs, dict):
+                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
+                    else:
+                        logits = outputs[1:]
+                else:
+                    loss = None
+                    with self.compute_loss_context_manager():
+                        outputs = model(**inputs)
+                    if isinstance(outputs, dict):
+                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys)
+                    else:
+                        logits = outputs
+                    # TODO: this needs to be fixed and made cleaner later.
+                    if self.args.past_index >= 0:
+                        self._past = outputs[self.args.past_index - 1]
+
+        if prediction_loss_only:
+            return (loss, None, None)
+
+        logits = nested_detach(logits)
+        if len(logits) == 1:
+            logits = logits[0]
+
+        return (loss, logits, labels, outputs["category_predictions"])

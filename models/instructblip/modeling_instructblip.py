@@ -76,6 +76,7 @@ class InstructBlipForConditionalGenerationModelOutput(ModelOutput):
     qformer_outputs: Optional[Tuple[torch.FloatTensor]] = None
     language_model_outputs: Optional[Tuple[torch.FloatTensor]] = None
     category_loss: Optional[Tuple[torch.FloatTensor]] = None
+    category_predictions: Optional[Tuple[torch.FloatTensor]] = None
 
     def to_tuple(self) -> Tuple[Any]:
         return tuple(
@@ -1442,8 +1443,13 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         language_model_inputs = self.language_projection(query_output)
         # add additional loss
         cls_loss = None
+        correct_predictions=None
         if category_gt != None:
             category_hidden_state = self.category_cls_head(torch.mean(language_model_inputs, dim=1)) #[B, 8]
+            # multiclass classification -> softmax
+            probabilities = nn.Softmax(dim=1)(category_hidden_state)
+            category_predictions = torch.argmax(probabilities, dim=1)
+            correct_predictions = (category_predictions == category_gt) #GT를 compute_metrics에 넣을 수 없어 여기서 미리 맞는/틀린거 넘긴다.
             cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
             cls_loss = cls_loss_criterion(category_hidden_state, category_gt)
 
@@ -1504,7 +1510,8 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
             vision_outputs=vision_outputs,
             qformer_outputs=query_outputs,
             language_model_outputs=outputs,
-            category_loss=cls_loss
+            category_loss=cls_loss,
+            category_predictions=correct_predictions,
         )
 
     @torch.no_grad()
@@ -1577,11 +1584,11 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel):
         query_output = query_outputs.last_hidden_state[:, : query_tokens.size(1), :]
 
         language_model_inputs = self.language_projection(query_output)
-        cls_loss = None
-        if category_gt != None:
-            category_hidden_state = self.category_cls_head(torch.mean(language_model_inputs, dim=1)) #[B, 8]
-            cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
-            cls_loss = cls_loss_criterion(category_hidden_state, category_gt)
+        # cls_loss = None
+        # if category_gt != None:
+        #     category_hidden_state = self.category_cls_head(torch.mean(language_model_inputs, dim=1)) #[B, 8]
+        #     cls_loss_criterion = nn.CrossEntropyLoss(reduction="mean")  # The loss function
+        #     cls_loss = cls_loss_criterion(category_hidden_state, category_gt)
 
         language_attention_mask = torch.ones(
             language_model_inputs.size()[:-1], dtype=torch.long, device=language_model_inputs.device

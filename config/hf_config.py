@@ -10,10 +10,13 @@ from transformers import TrainingArguments, PretrainedConfig, Seq2SeqTrainingArg
 from typing import Dict, Optional, Sequence, List, Any
 from functools import partial
 
+@dataclass
+class VisualClassifierConfig(PretrainedConfig):
+    hidden_size: int=1408
 
 @dataclass
 class ModelArguments(PretrainedConfig):
-    model_type: str=field(default=None)#["instructblip_vicuna", "instructblip_flant5", "R50_BERT"]
+    model_type: str=field(default=None)#["instructblip_vicuna", "instructblip_flant5", "R50_BERT", "visual_classifier", "textual_classifier"]
     pretrained_model_path: str="Salesforce/instructblip-vicuna-7b"#can be switched with url or saved pretrained model path , "Salesforce/instructblip-flan-t5-xxl"
     freeze_llm: bool=True
     freeze_image_encoder: bool=True
@@ -29,7 +32,8 @@ class ModelArguments(PretrainedConfig):
     sam_feat_dim: int=1280
     use_onlySAM: bool=False #vit feature을 쓰는 것이 아닌, sam feature만을 사용해서 qformer에 cross attention시킴 
     white_image_crossattention: bool=True #모델 forward시 qformer가 흰색 이미지일경우 cross attention받을지 말지. 기본은 받는 것
-    use_dynamic_sam: bool=True
+    use_dynamic_sam: bool=False
+    visual_classifier: VisualClassifierConfig = field(default_factory=VisualClassifierConfig)
 
     # Additional loss config
     category_classification_loss: bool=False
@@ -84,7 +88,6 @@ class DataArguments:
     caption_path: str="/data/QWEN_caption/Qwen_caption.json"
     use_dynamic_caption: bool=False
     qwen_pretrained_model_path: str=field(default=None)
-
     # SAM token mask 실험
     SAM_token_mask: bool=False  
     token_mask_path: str="/data/SAM_features/decoder_features/token_mask_features"
@@ -95,6 +98,11 @@ class DataArguments:
 
     #for submission
     challenge_phase: str=field(default=None)
+
+    #legacy training set
+    use_train_legacy: bool=False
+
+    ensemble_prediction_type: bool=False
 
 
 @dataclass
