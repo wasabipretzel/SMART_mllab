@@ -6,6 +6,7 @@ __pycache__
 # Other
 .DS_Store
 wandb
+*.out
 
 checkpoints/*
 utils/openai_test/playground/*
