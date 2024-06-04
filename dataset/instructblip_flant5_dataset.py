@@ -155,16 +155,18 @@ class InstructblipFlant5Dataset(Dataset):
     def get_input_text(self, qa_pair):
         #process input text -> this function can be developed for instruction tuning etc
         if self.data_args.prediction_type == 'answerkey':
-            # prompt = "Please read the following question, select the correct answer from one of the options.\n"
-            prompt = "Please read the following question, select the correct answer from one of the options."
+            prompt = "Please read the following question, select the correct answer from one of the options.\n"
+            # prompt = "Please read the following question, select the correct answer from one of the options."
         elif self.data_args.prediction_type == 'answervalue':
-            # prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value.\n"
-            prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value."
+            prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value.\n"
+            # prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value."
+        elif self.data_args.prediction_type == "answerall":
+            prompt = "Please read the following question, calculate the answer value and select the correct answer and the value of the answer from the options.\n"
         else:
             raise NotImplementedError
 
-        # question = "Question : " + qa_pair["Question"] + '\n' + 'Options : ' + qa_pair["options"] + "\n" + "Answer : "
-        question = "Question : " + qa_pair["Question"] + 'Options : ' + qa_pair["options"] + ". Answer : "
+        question = "Question : " + qa_pair["Question"] + '\n' + 'Options : ' + qa_pair["options"] + "\n" + "Answer : "
+        # question = "Question : " + qa_pair["Question"] + 'Options : ' + qa_pair["options"] + ". Answer : "
 
         if self.data_args.use_caption:
             image_name = qa_pair["image"]
@@ -211,6 +213,10 @@ class InstructblipFlant5Dataset(Dataset):
             # else:
             #     answer = qa_pair[answer_key]
             answer = qa_pair[answer_key] #float 의미가 없는게 tokenize될때 string이어야 함
+        elif self.data_args.prediction_type == "answerall":
+            answer_key = qa_pair["Answer"]
+            answervalue = qa_pair[answer_key]
+            answer = answer_key + " : " + answervalue
         else:
             raise NotImplementedError
 
@@ -368,7 +374,7 @@ class InstructblipFlant5Dataset(Dataset):
         
         if self.data_args.category_classification_mapping_path != None:
             gt_category_num = self.get_category_num(single_qa_pair)
-        
+            
         data = {
             'pixel_values' : image,
             # llm input

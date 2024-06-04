@@ -1,5 +1,5 @@
-from metrics.base_criterion import ComputeMetricAnswerValue, ComputeMetricAnswerKey
-from metrics.submission_criterion import SubmissionCriterionAnswerKey, SubmissionCriterionAnswerValue
+from metrics.base_criterion import ComputeMetricAnswerValue, ComputeMetricAnswerKey, ComputeMetricAnswerAll
+from metrics.submission_criterion import SubmissionCriterionAnswerKey, SubmissionCriterionAnswerValue, SubmissionCriterionAnswerAll
 from metrics.cls_criterion import ComputeMetricVisual
 from metrics.smart_basecode_criterion import Criterion
 
@@ -11,12 +11,16 @@ def get_metric(model_args, data_args, processor, embeddings, eval_infos):
                 return SubmissionCriterionAnswerKey(tokenizer=processor.tokenizer, vicuna_embedding=embeddings, eval_infos=eval_infos, puzzle_path=data_args.puzzle_path)
             elif data_args.prediction_type == "answervalue":
                 return SubmissionCriterionAnswerValue(tokenizer=processor.tokenizer, vicuna_embedding=embeddings, eval_infos=eval_infos, puzzle_path=data_args.puzzle_path)
+            elif data_args.prediction_type == "answerall":
+                return SubmissionCriterionAnswerAll(tokenizer=processor.tokenizer, vicuna_embedding=embeddings, eval_infos=eval_infos, puzzle_path=data_args.puzzle_path)
             else:
                 raise NotImplementedError
         elif data_args.prediction_type == "answerkey":
             return ComputeMetricAnswerKey(tokenizer=processor.tokenizer, vicuna_embedding=embeddings, eval_infos=eval_infos, puzzle_path=data_args.puzzle_path)
         elif data_args.prediction_type == "answervalue":
             return ComputeMetricAnswerValue(tokenizer=processor.tokenizer, vicuna_embedding=embeddings, eval_infos=eval_infos, puzzle_path=data_args.puzzle_path)
+        elif data_args.prediction_type == "answerall":
+            return ComputeMetricAnswerAll(tokenizer=processor.tokenizer, vicuna_embedding=embeddings, eval_infos=eval_infos, puzzle_path=data_args.puzzle_path)
     elif model_args.model_type=="R50_BERT":
         return Criterion()
     elif model_args.model_type=="visual_classifier":
