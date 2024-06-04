@@ -13,10 +13,12 @@ from functools import partial
 
 @dataclass
 class ModelArguments(PretrainedConfig):
-    model_type: str=field(default=None)#["instructblip_vicuna", "instructblip_flant5", "R50_BERT"]
-    pretrained_model_path: str="Salesforce/instructblip-vicuna-7b"#can be switched with url or saved pretrained model path , "Salesforce/instructblip-flan-t5-xxl"
+    # model_type: str=field(default=None)#["instructblip_vicuna", "instructblip_flant5", "R50_BERT"]
+    # pretrained_model_path: str="Salesforce/instructblip-vicuna-7b"#can be switched with url or saved pretrained model path , "Salesforce/instructblip-flan-t5-xxl"
+    llm_pretrained_model_path: str="google/flan-t5-xl"
+    llm_model_type: str=field(default=None)#["instructblip_vicuna", "instructblip_flant5", "R50_BERT"]
     freeze_llm: bool=True
-    freeze_image_encoder: bool=True
+    # freeze_image_encoder: bool=True
     use_bf16: bool=True
     use_lora: bool=True
     lora_r: int=16
@@ -24,15 +26,6 @@ class ModelArguments(PretrainedConfig):
     lora_dropout: float=0.05
     smart_starter_pretrained_path: str=field(default=None) 
     
-    #for SAM feature experiment
-    use_SAM: bool=False
-    sam_feat_dim: int=1280
-    use_onlySAM: bool=False #vit feature을 쓰는 것이 아닌, sam feature만을 사용해서 qformer에 cross attention시킴 
-    white_image_crossattention: bool=True #모델 forward시 qformer가 흰색 이미지일경우 cross attention받을지 말지. 기본은 받는 것
-    llm_only: bool=False # white image일 때 false -> qformer text 사용, true -> llm만 사용
-    # Additional loss config
-    category_classification_loss: bool=True
-
     def to_dict(self) -> Dict[str, Any]:
         """
             HF PretrainedConfig's to_dict() make class attribute "model_type" to ignore argparse's model_type.
@@ -67,8 +60,6 @@ class DataArguments:
     data_path: str="/home/work/instructblip/data/SMART101-release-v1/SMART101-Data"
     puzzle_path: str="/home/work/instructblip/data/SMART101-release-v1/puzzle_type_info.csv"
 
-    #for SAM feature
-    sam_feature_path: str=field(default=None) #NOTE : 1. 기본은 None sh file에서 지정해줘야함 (dataset 에서 그래야 사용/비사용 구분이 가능) 2. decoder feature 사용시에 path 바꿔줘야함
 
     # num_class: int=91
     prediction_type: str=field(default="answerkey") #could be ["answerkey","answervalue"]. answerkey predict one of 'A','B','C','D','E'. answervalue predict float/str value
@@ -77,18 +68,6 @@ class DataArguments:
     # Caption 실험 argument
     use_caption: bool=False #caption 실험 
     caption_path: str="/home/work/instructblip/data/QWEN_caption/Qwen_caption.json"
-
-    # SAM token mask 실험
-    SAM_token_mask: bool=False  
-    token_mask_path: str="/home/work/instructblip/data/SAM_features/decoder_features/token_mask_features"
-    
-    # image mask 실험
-    image_mask: bool=False
-    patch_size: int=14
-
-    # category classification loss
-    # category_classification_mapping_path = "/data/category_mapping/puzzle_2_categorynum_mapping.json"
-    category_classification_mapping_path: str=field(default=None)
 
 
 @dataclass
@@ -101,7 +80,8 @@ class TrainingArguments(Seq2SeqTrainingArguments):
     logging_steps: int=1
     project_name: str=field(default="smart_challenge")
     label_names: List[str]=field(default_factory=partial(list, ["labels"]))
-    load_ckpt_path: str=field(default=None)
+    # load_ckpt_path: str=field(default=None)
+    llm_load_ckpt_path: str=field(default=None)
     seed: int=42
     should_log: bool=True
     ddp_find_unused_parameters: bool=False

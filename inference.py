@@ -71,14 +71,14 @@ def inference():
     ## DataLoader
     data_module = get_dataset(model_args, data_args, mode, processor=processor)
 
-    embeddings = copy.deepcopy(model.VLM.language_model.get_input_embeddings())
+    embeddings = copy.deepcopy(model.LLM.get_input_embeddings())
     metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"])
 
     trainer = Seq2SeqTrainer(model=model,
                     args=training_args,
                     compute_metrics=metric.compute_metrics,
                     data_collator = data_module["data_collator"],
-                    tokenizer=processor.tokenizer if "instructblip" in model_args.model_type else None,
+                    tokenizer=processor if "flant5" in model_args.llm_model_type else None,
                     )
 
 

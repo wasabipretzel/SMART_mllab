@@ -56,22 +56,22 @@ def train():
         + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
     )
     
-    logger.info("Initializing model and processor")
+    logger.info("Initializing model and tokenizer")
 
-    model, processor = get_model(model_args, training_args)
+    model, tokenizer = get_model(model_args, training_args)
 
     logger.info(f"Trainable model params : {count_parameters(model)}")
 
     # craete dataset & collator
-    data_module = get_dataset(model_args, data_args, mode, processor=processor)
+    data_module = get_dataset(model_args, data_args, mode, tokenizer=tokenizer)
 
     # For evaluation phase, we need embeddings of llm
-    if "instructblip" in model_args.model_type:
-        embeddings = copy.deepcopy(model.VLM.language_model.get_input_embeddings())
+    if "flant5" in model_args.llm_model_type:
+        embeddings = copy.deepcopy(model.LLM.get_input_embeddings())
     else:
         embeddings= None
-    metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"])
-    trainer = get_trainer(model_args, training_args, model, metric, processor, data_module)
+    metric = get_metric(model_args, data_args, tokenizer, embeddings, data_module["eval_dataset"])
+    trainer = get_trainer(model_args, training_args, model, metric, tokenizer, data_module)
 
     trainer.train()
     trainer.save_model(training_args.output_dir)

@@ -58,16 +58,13 @@ export PATH=$PATH:path/to/HIP/bin
 #     --run_name instructblip_baseline \
 #     --report_to none
 
-python /home/work/instructblip/SMART_mllab/train.py \
+python /home/work/instructblip/SMART_llm/train.py \
     --output_dir /home/work/instructblip/data/ckpt/ \
-    --prediction_type answerall \
-    --model_type instructblip_flant5 \
-    --pretrained_model_path Salesforce/instructblip-flan-t5-xl \
-    --image_mask true \
-    --llm_only true \
-    --category_classification_loss true \
-    --category_classification_mapping_path /home/work/instructblip/data/category_mapping/puzzle_2_categorynum_mapping.json \
-    --num_train_epochs 10 \
+    --prediction_type answerkey \
+    --llm_model_type flant5 \
+    --llm_pretrained_model_path google/flan-t5-xl \
+    --num_train_epochs 100 \
+    --use_caption false \
     --per_device_train_batch_size 32 \
     --per_device_eval_batch_size 20 \
     --gradient_accumulation_steps 1 \
@@ -83,7 +80,7 @@ python /home/work/instructblip/SMART_mllab/train.py \
     --lr_scheduler_type cosine \
     --dataloader_num_workers 4 \
     --project_name SMART_challenge \
-    --run_name instructblip_image_masking_branch_llm_new_loss+cls_loss \
+    --run_name instructblip_llm_only \
     --report_to wandb
 
 
