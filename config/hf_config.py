@@ -10,14 +10,11 @@ from transformers import TrainingArguments, PretrainedConfig, Seq2SeqTrainingArg
 from typing import Dict, Optional, Sequence, List, Any
 from functools import partial
 
-@dataclass
-class VisualClassifierConfig(PretrainedConfig):
-    hidden_size: int=1408
 
 @dataclass
 class ModelArguments(PretrainedConfig):
-    model_type: str=field(default=None)#["instructblip_vicuna", "instructblip_flant5", "R50_BERT", "visual_classifier", "textual_classifier"]
-    pretrained_model_path: str="Salesforce/instructblip-vicuna-7b"#can be switched with url or saved pretrained model path , "Salesforce/instructblip-flan-t5-xxl"
+    model_type: str=field(default=None)#["instructblip_vicuna", "instructblip_flant5", "R50_BERT"]
+    pretrained_model_path: str="Salesforce/instructblip-flan-t5-xl"#can be switched with url or saved pretrained model path , "Salesforce/instructblip-flan-t5-xxl"
     freeze_llm: bool=True
     freeze_image_encoder: bool=True
     use_bf16: bool=True
@@ -26,83 +23,42 @@ class ModelArguments(PretrainedConfig):
     lora_alpha: int=32
     lora_dropout: float=0.05
     smart_starter_pretrained_path: str=field(default=None) 
-    
-    #for SAM feature experiment
-    use_SAM: bool=False
-    sam_feat_dim: int=1280
-    use_onlySAM: bool=False #vit feature을 쓰는 것이 아닌, sam feature만을 사용해서 qformer에 cross attention시킴 
-    white_image_crossattention: bool=True #모델 forward시 qformer가 흰색 이미지일경우 cross attention받을지 말지. 기본은 받는 것
-    use_dynamic_sam: bool=False
-    visual_classifier: VisualClassifierConfig = field(default_factory=VisualClassifierConfig)
-
-    # Additional loss config
-    category_classification_loss: bool=False
-
-    def to_dict(self) -> Dict[str, Any]:
-        """
-            HF PretrainedConfig's to_dict() make class attribute "model_type" to ignore argparse's model_type.
-            (cause trouble when saving model and loading with config)
-        """
-        output = copy.deepcopy(self.__dict__)
-        for key, value in output.items():
-            # Deal with nested configs like CLIP
-            if isinstance(value, PretrainedConfig):
-                value = value.to_dict()
-                del value["transformers_version"]
-
-            output[key] = value
-
-        if hasattr(self, "quantization_config"):
-            output["quantization_config"] = (
-                self.quantization_config.to_dict()
-                if not isinstance(self.quantization_config, dict)
-                else self.quantization_config
-            )
-
-            # pop the `_pre_quantization_dtype` as torch.dtypes are not serializable.
-            _ = output.pop("_pre_quantization_dtype", None)
-        self.dict_torch_dtype_to_str(output)
-
-        return output
+    image_size: int=224
+    s2wrapper: bool=False
+    image_encoder: str=field(default='vit') # ['vit', 'swin', 'vit_384']
 
 @dataclass
 class DataArguments:
     split_type: str="PS"
-    split_path: str="/data/split"
-    data_path: str="/data/SMART101-release-v1/SMART101-Data"
-    puzzle_path: str="/data/SMART101-release-v1/puzzle_type_info.csv"
-
-    #for SAM feature
-    sam_feature_path: str=field(default=None) #NOTE : 1. 기본은 None sh file에서 지정해줘야함 (dataset 에서 그래야 사용/비사용 구분이 가능) 2. decoder feature 사용시에 path 바꿔줘야함
-    #for SAM dynamic feature
-    sam_pretrained_model_path: str=field(default=None) #/data/pretrained_ckpt/sam-vit-huge
-    use_dynamic_sam_decoder: bool=False
-    use_dynamic_sam_encoder: bool=False
-
+    split_path: str="/home/work/g-earth-22/VLM/VLM/database/SMART-101/data/split"
+    data_path: str="/home/work/g-earth-22/VLM/VLM/database/SMART-101/data/SMART101-release-v1/SMART101-Data"
+    puzzle_path: str="/home/work/g-earth-22/VLM/VLM/database/SMART-101/data/SMART101-release-v1/puzzle_type_info.csv"
     # num_class: int=91
     prediction_type: str=field(default="answerkey") #could be ["answerkey","answervalue"]. answerkey predict one of 'A','B','C','D','E'. answervalue predict float/str value
-    background_exclude: bool=False
+    data_image_size: int=224
+    add_cot: bool = False
+    add_puzzle_option: bool = False
+    puzzle_type: str = None
+    permutation: bool = False
+    permutation_option: str=field(default='opt-shift') # opt-reverse, opt-shift
+    add_data: bool = False
+    split_eval: bool = False
+    split_eval_option : bool = False
 
-    # Caption 실험 argument
-    use_caption: bool=False #caption 실험 
-    caption_path: str="/data/QWEN_caption/Qwen_caption.json"
-    use_dynamic_caption: bool=False
-    qwen_pretrained_model_path: str=field(default=None)
-    # SAM token mask 실험
-    SAM_token_mask: bool=False  
-    token_mask_path: str="/data/SAM_features/decoder_features/token_mask_features"
-    
-    # category classification loss
-    # category_classification_mapping_path = "/data/category_mapping/puzzle_2_categorynum_mapping.json"
+    use_caption: bool=False
     category_classification_mapping_path: str=field(default=None)
-
+    sam_feature_path: str=field(default=None)
+    SAM_token_mask: bool=False
+    
     #for submission
     challenge_phase: str=field(default=None)
 
-    #legacy training set
-    use_train_legacy: bool=False
+    use_dynamic_sam_decoder: bool=False 
+    use_dynamic_sam_encoder: bool=False
+    use_dynamic_caption: bool=False
+    sam_pretrained_model_path: str=field(default=None)
+    qwen_pretrained_model_path: str=field(default=None)
 
-    ensemble_prediction_type: bool=False
 
 
 @dataclass
@@ -118,9 +74,14 @@ class TrainingArguments(Seq2SeqTrainingArguments):
     load_ckpt_path: str=field(default=None)
     seed: int=42
     should_log: bool=True
-    ddp_find_unused_parameters: bool=True
+    ddp_find_unused_parameters: bool=False
     pretrained_module_lr: float=field(default=1e-6) #learning rate for pretrained moduel
     scratch_module_lr: float=field(default=1e-4) #learning rate for modules which are trained from scratch
     #generation arguments in trainer evaluate()
     predict_with_generate: bool=True # evaluate시 AR방식으로 생성해서 결과 뽑아주게함. False면 teacher forcing
-    max_length=256
+    max_length: int = 256
+
+    class_ensemble: bool=False
+    load_key_ckpt_path: str=field(default=None)
+    load_value_ckpt_path: str=field(default=None)
+

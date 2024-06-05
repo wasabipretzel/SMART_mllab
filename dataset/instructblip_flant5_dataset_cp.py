@@ -17,7 +17,6 @@ from utils.util import is_float
 
 from itertools import permutations
 import random
-# import dataset.add_dataset as add_dataset
 
 class InstructblipFlant5Dataset(Dataset):
     """
@@ -27,35 +26,18 @@ class InstructblipFlant5Dataset(Dataset):
     def __init__(self, data_args, mode, processor=None):
         super().__init__()
         assert mode in ['train', 'val', 'test']
-
+        import pudb; pudb.set_trace()
         self.data_args = data_args
         self.mode = mode
         self.info_file = pd.read_csv(data_args.puzzle_path)
         self.qa_info = self.get_qainfo()
-
-        # select qa
         if data_args.puzzle_type is not None:
             self.qa_info = self.select_qainfo()
-
-        if mode == 'test' and data_args.split_eval:
-            self.qa_info = self.split_qainfo()
-
-
-        self.qa_info = self.generate_option_key(self.qa_info)
-        self.qa_info  = self.append_prediction_type(self.qa_info) #use for option approximation when prediction type is 'answervalue'
+        self.generate_option_key()
+        self.append_prediction_type() #use for option approximation when prediction type is 'answervalue'
+        if data_args.permutation and mode == 'train':
+            self.qa_info = self.permutation_option()
         
-        if mode == 'test' and data_args.split_eval_option:
-            self.qa_info = self.split_qainfo_option()
-
-        # if data_args.permutation and mode == 'train': # 수정 필요
-        #     self.qa_info = self.option_permutation()
-
-        if data_args.add_data and mode == 'train':
-            add_data = self.process_add_data()
-            add_data = self.generate_option_key(add_data)
-            add_data = self.append_prediction_type(add_data)
-            self.qa_info = self.qa_info + add_data
-
         """
             single instance example of self.qa_info
 
@@ -66,65 +48,57 @@ class InstructblipFlant5Dataset(Dataset):
             'Answer': 'D', 'Note': 'C(5|2)', 
             'puzzle_id': '19', 'AnswerValue': 10}
         """
-        print('total puzzle num :', len(self.qa_info))
 
-    def process_add_data(self):
-
-        res = []
-        res += add_dataset.mathverse_qa_dict 
-        res += add_dataset.mathvision_qa_dict
-        res += add_dataset.iconqa_qa_dict
-        res += add_dataset.scienceqa_qa_dict
-        res += add_dataset.mathvista_qa_dict
-        res += add_dataset.mmstar_qa_dict
-        res += add_dataset.mmbench_qa_dict
-        res += add_dataset.raven_qa_dict
-        res += add_dataset.mmmu_qa_dict
-        return res
-
+    def permutation_option(self):
+        print(self.qa_info[0])
+        print('before permutation :', len(self.qa_info))
+        permuted_qa_info = []
+        for qa_pair in tqdm(self.qa_info):
+            options = qa_pair['options'][:-1].split(', ')
+            permuted_option_list = [p for p in permutations(options)]
+            permuted_option_list = random.sample(permuted_option_list, 3) # 3개 sample
+            for permuted_option in permuted_option_list:
+                qa_pair['options'] = ', '.join(permuted_option)+'.'
+                permuted_qa_info.append(qa_pair)
+        print('after permutation :', len(permuted_qa_info))
+        print(permuted_qa_info[0])
         return permuted_qa_info
 
-    def generate_option_key(self, qa_info):
+    def generate_option_key(self):
         """_summary_
             given self.qa_info, create option key and value for input text prompt
             {'A': '6', 'B': '13', 'C': '12', 'D': '10', 'E': '9'} -> {options : "A : 6, B : 13, C : 12, D : 10, E : 9"}
         """
-        option_candidates = ["A","B","C","D","E","F","G","H"]
-        for qa_pair in qa_info:
+        option_candidates = ["A","B","C","D","E"]
+        for qa_pair in self.qa_info:
             option_values = ""
-            for each_option in option_candidates: # 추가된 데이터에 대한 작업 (2지선다, 3지선다...)
-                # if each_option != "E":
-                #     update_msg = f"{each_option} : {qa_pair[each_option]}, "
-                # else:
-                #     update_msg = f"{each_option} : {qa_pair[each_option]}."
-                if each_option in qa_pair:
+            for each_option in option_candidates:
+                if each_option != "E":
                     update_msg = f"{each_option} : {qa_pair[each_option]}, "
-                    option_values += update_msg
                 else:
-                    break
-            option_values = option_values[:-2]+'.'
+                    update_msg = f"{each_option} : {qa_pair[each_option]}."
+                option_values += update_msg
             qa_pair["options"] = option_values
         
-        return qa_info
+        return
     
-    def append_prediction_type(self, qa_info):
+    def append_prediction_type(self):
         """_summary_
             given self.qa_info, add value whether problem answer type is float/string. (For option approximation)
             method : if all option value can be converted to float, answer type is float. Else string type
             Later, string type will be approximate with embedding cosine similarity. Float type will be approximate with distance measure.
         """
-        option_candidates = ["A","B","C","D","E","F","G","H"]
-        for qa_pair in qa_info:
+        option_candidates = ["A","B","C","D","E"]
+        for qa_pair in self.qa_info:
             float_flag = True
             for each_option in option_candidates:
-                if each_option in qa_pair:
-                    if is_float(qa_pair[each_option]) == False:
-                        float_flag = False
+                if is_float(qa_pair[each_option]) == False:
+                    float_flag = False
             if float_flag == True:
                 qa_pair["answer_type"] = 'float'
             else:
                 qa_pair["answer_type"] = 'string'
-        return qa_info
+        return
 
     def get_qainfo(self) -> List[dict]:
         """
@@ -133,14 +107,6 @@ class InstructblipFlant5Dataset(Dataset):
         data_path = os.path.join(self.data_args.split_path, self.data_args.split_type, self.mode+'.pkl')
         with open(data_path, 'rb') as f:
             qa_info = pkl.load(f)
-        
-        # by yjheo:
-        if self.mode == 'test':
-            data_path = os.path.join(self.data_args.split_path, self.data_args.split_type, 'val.pkl')
-            with open(data_path, 'rb') as f:
-                qa_info_addi = pkl.load(f)
-            qa_info = qa_info + qa_info_addi
-            
         return qa_info
 
     def select_qainfo(self) -> List[dict]:
@@ -149,31 +115,6 @@ class InstructblipFlant5Dataset(Dataset):
             pid = int(qa['puzzle_id'])
             if self.info_file[self.info_file['puzzle_id'] == pid].type.item() == self.data_args.puzzle_type:
                 selected_qainfo.append(qa)
-        return selected_qainfo
-
-    def split_qainfo(self) -> List[dict]:
-        if self.data_args.prediction_type == 'answerkey':
-            puzzle_type_list = ['logic', 'spatial', 'path']
-        elif self.data_args.prediction_type == 'answervalue':
-            puzzle_type_list = ['math', 'measure', 'algebra', 'counting', 'pattern']
-
-        selected_qainfo = []
-        for qa in tqdm(self.qa_info):
-            pid = int(qa['puzzle_id'])
-            if self.info_file[self.info_file['puzzle_id'] == pid].type.item() in puzzle_type_list:
-                selected_qainfo.append(qa)
-        return selected_qainfo
-
-    def split_qainfo_option(self) -> List[dict]:
-        selected_qainfo = []
-        if self.data_args.prediction_type == 'answerkey':
-            for qa in tqdm(self.qa_info):
-                if qa['answer_type'] == 'string':
-                    selected_qainfo.append(qa)
-        elif self.data_args.prediction_type == 'answervalue':
-            for qa in tqdm(self.qa_info):
-                if qa['answer_type'] == 'float':
-                    selected_qainfo.append(qa)
         return selected_qainfo
 
     def load_image(self, qa_pair):
@@ -186,14 +127,9 @@ class InstructblipFlant5Dataset(Dataset):
             'Answer': 'D', 'Note': 'C(5|2)', 
             'puzzle_id': '19', 'AnswerValue': 10}
         """
-        if 'puzzle_id' in qa_pair:
-            image_path = os.path.join(self.data_args.data_path, qa_pair["puzzle_id"], "img", qa_pair["image"])
-        else:
-            image_path = qa_pair['image']
-        try:
-            image = Image.open(image_path).convert("RGB").resize((self.data_args.data_image_size, self.data_args.data_image_size), resample=Image.BICUBIC).convert("RGB") # 좌우 크기 다른 이미지 존재
-        except:
-            image = qa_pair['image'] # tmp
+        image_path = os.path.join(self.data_args.data_path, qa_pair["puzzle_id"], "img", qa_pair["image"])
+        image = Image.open(image_path).resize((self.data_args.data_image_size, self.data_args.data_image_size)).convert("RGB")
+
         return image
 
     def get_input_text(self, qa_pair, pid):
@@ -204,7 +140,7 @@ class InstructblipFlant5Dataset(Dataset):
             prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value.\n"
         if self.data_args.add_cot:
             prompt = "Let’s think step by step. " + prompt
-        if self.data_args.add_puzzle_option and pid is not None:
+        if self.data_args.add_puzzle_option:
             # print('pid', pid)
             cur_puzzle_type = self.info_file[self.info_file['puzzle_id'] == pid].type.item()
             # print('cur_puzzle_type', cur_puzzle_type)
@@ -244,69 +180,23 @@ class InstructblipFlant5Dataset(Dataset):
             qa_pair (_type_): _description_
         """
         option_values = []
-        opts_candidates=["A","B","C","D","E","F","G","H"]
+        opts_candidates=["A","B","C","D","E"]
         for option_key in opts_candidates:
-            if option_key in qa_pair:
-                # print('qa_pair', qa_pair) # comment by yjheo (24/05/25)
-                if qa_pair["answer_type"] == "float":
-                    option_values.append(float(qa_pair[option_key]))
-                else:
-                    option_values.append(qa_pair[option_key])
+            if qa_pair["answer_type"] == "float":
+                option_values.append(float(qa_pair[option_key]))
+            else:
+                option_values.append(qa_pair[option_key])
         return option_values
-
-    def option_permutation(self, qa_pair): # 문자가 규칙적이지 않음 options = 'A : 0,2 and 2, B : 1,2 and 9, C : 2, 4 and 9.' 여기서 C처럼 2, 4
-        options = qa_pair['options'][:-1]
-        keys = ['A : ', 'B : ', 'C : ', 'D : ', 'E : ', 'F : ', 'G : ', 'H : ']
-        option_keys = []
-        for key in keys:
-            if key in options:
-                option_keys.append(key[0])
-            options = options.replace(key, '<sep>')
-        options = options.replace(', <sep>', '<sep>')
-        option_values = options.split('<sep>')[1:]
-
-        if option_keys == option_values: # A : A, B : B, C : C, D : D, E : E 같은 경우
-            pass
-
-        else:
-            if self.data_args.permutation_option == 'opt-shift':
-                options = []
-                key_list = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
-                random.shuffle(option_values)
-                for i, value in enumerate(option_values):
-                    if key_list[i] in qa_pair:
-                        options.append(f'{key_list[i]} : {value}')
-                        qa_pair[key_list[i]] = value
-                        if str(value) == str(qa_pair['AnswerValue']):
-                            qa_pair['Answer'] = key_list[i]
-                    else:
-                        break
-                qa_pair['options'] = ', '.join(options)+'.'
-
-            elif self.data_args.permutation_option == 'opt-reverse':
-                random.shuffle(options)
-                qa_pair['options'] = ', '.join(options)+'.'
-
-        return qa_pair
-            
 
     def __len__(self):
         return len(self.qa_info)
         
     def __getitem__(self, idx):
         single_qa_pair = self.qa_info[idx]
-        if 'puzzle_id' in single_qa_pair:
-            pid = int(single_qa_pair["puzzle_id"])
-        else:
-            pid = None
+        pid = int(single_qa_pair["puzzle_id"])
         image = self.load_image(single_qa_pair)
-        try:
-            if self.data_args.permutation:
-                single_qa_pair = self.option_permutation(single_qa_pair)
-        except:
-            print('single_qa_pair', single_qa_pair)
         text_input = self.get_input_text(single_qa_pair, pid)
-        text_output = self.get_output_text(single_qa_pair)
+        text_output = self.get_output_text(single_qa_pair) 
         option_values = self.get_option_values(single_qa_pair)
         data = {
             'pixel_values' : image,
@@ -351,12 +241,8 @@ class InstructblipFlant5_collator(object):
             b_text_input.append(each_batch["text_input"])
             b_text_output.append(each_batch["text_output"])
 
-        # qformer input
-        try :
-            image_input = self.processor(images=b_pixel_values, return_tensors='pt')
-        except:
-            print('b_pixel_values', b_pixel_values)
-            print('b_text_input', b_text_input)
+        #qformer input
+        image_input = self.processor(images=b_pixel_values, return_tensors='pt')
         qformer_text_input = self.processor(text=b_qformer_text_input, padding=True, truncation=True, return_tensors='pt')
         #llm I/O 
         text_input = self.processor(text=b_text_input, padding=True, truncation=True, return_tensors='pt')
@@ -365,9 +251,9 @@ class InstructblipFlant5_collator(object):
         self.processor.tokenizer.add_eos_token=True
         text_output = self.processor(text=b_text_output, padding=True, truncation=True, return_tensors='pt')
         self.processor.tokenizer.add_eos_token=False
-        # target
+        #target
         targets = text_output.input_ids.masked_fill(
-            text_output.input_ids == self.processor.tokenizer.pad_token_id, -100
+            text_output.input_ids == self.processor.tokenizer.pad_token_id, -100 
         )
         if mode == "train":
             inputs = {

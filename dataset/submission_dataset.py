@@ -19,20 +19,23 @@ class SubmissionDataset(Dataset):
         super().__init__()
         assert mode in ['train', 'val', 'test']
 
+
         self.data_args = data_args
         self.mode = mode
         self.submission_root = "/dataset/"
         self.image_path = os.path.join(self.submission_root, "test-images")
         self.puzzle_file = "VLAR-val.json" if data_args.challenge_phase == 'val' else 'VLAR-test.json'
         self.qa_info = self.get_qainfo()
-        self.generate_option_key()
-        self.append_prediction_type() #use for option approximation when prediction type is 'answervalue'
 
-        if self.data_args.use_caption:
-            self.caption_info = self.load_extracted_caption()
-        
-        if self.data_args.category_classification_mapping_path != None:
-            self.puzzle_2_category = self.load_category_mapping()
+        self.qa_info = self.generate_option_key(self.qa_info)
+        self.qa_info  = self.append_prediction_type(self.qa_info) #use for option approximation when prediction type is 'answervalue'
+
+        if data_args.add_data and mode == 'train':
+            add_data = self.process_add_data()
+            add_data = self.generate_option_key(add_data)
+            add_data = self.append_prediction_type(add_data)
+            self.qa_info = self.qa_info + add_data
+
         """
             single instance example of self.qa_info
 
@@ -43,58 +46,65 @@ class SubmissionDataset(Dataset):
             'Answer': 'D', 'Note': 'C(5|2)', 
             'puzzle_id': '19', 'AnswerValue': 10}
         """
+        print('total puzzle num :', len(self.qa_info))
 
-    def load_category_mapping(self):
-        """
-            {   "puzzle_id (str) " : category num (0~7)
-                "1" : 0,
-                "2" : 3,
-                ..
-            }
-        """
-        with open(self.data_args.category_classification_mapping_path, 'r') as f:
-            puzzle_id_2_category_num = json.load(f)
-        return puzzle_id_2_category_num
+    def process_add_data(self):
 
-    def load_extracted_caption(self):
-        with open(self.data_args.caption_path, 'r') as f:
-            extracted_caption = json.load(f)
-        return extracted_caption
-    
-    def generate_option_key(self):
+        res = []
+        res += add_dataset.mathverse_qa_dict 
+        res += add_dataset.mathvision_qa_dict
+        res += add_dataset.iconqa_qa_dict
+        res += add_dataset.scienceqa_qa_dict
+        res += add_dataset.mathvista_qa_dict
+        res += add_dataset.mmstar_qa_dict
+        res += add_dataset.mmbench_qa_dict
+        res += add_dataset.raven_qa_dict
+        res += add_dataset.mmmu_qa_dict
+        return res
+
+        return permuted_qa_info
+
+    def generate_option_key(self, qa_info):
         """_summary_
             given self.qa_info, create option key and value for input text prompt
             {'A': '6', 'B': '13', 'C': '12', 'D': '10', 'E': '9'} -> {options : "A : 6, B : 13, C : 12, D : 10, E : 9"}
         """
-        option_candidates = ["A","B","C","D","E"]
-        for qa_pair in self.qa_info:
+        option_candidates = ["A","B","C","D","E","F","G","H"]
+        for qa_pair in qa_info:
             option_values = ""
-            for each_option in option_candidates:
-                if each_option != "E":
+            for each_option in option_candidates: # 추가된 데이터에 대한 작업 (2지선다, 3지선다...)
+                # if each_option != "E":
+                #     update_msg = f"{each_option} : {qa_pair[each_option]}, "
+                # else:
+                #     update_msg = f"{each_option} : {qa_pair[each_option]}."
+                if each_option in qa_pair:
                     update_msg = f"{each_option} : {qa_pair[each_option]}, "
+                    option_values += update_msg
                 else:
-                    update_msg = f"{each_option} : {qa_pair[each_option]}."
-                option_values += update_msg
+                    break
+            option_values = option_values[:-2]+'.'
             qa_pair["options"] = option_values
-        return
+        
+        return qa_info
     
-    def append_prediction_type(self):
+    def append_prediction_type(self, qa_info):
         """_summary_
             given self.qa_info, add value whether problem answer type is float/string. (For option approximation)
             method : if all option value can be converted to float, answer type is float. Else string type
             Later, string type will be approximate with embedding cosine similarity. Float type will be approximate with distance measure.
         """
-        option_candidates = ["A","B","C","D","E"]
-        for qa_pair in self.qa_info:
+        option_candidates = ["A","B","C","D","E","F","G","H"]
+        for qa_pair in qa_info:
             float_flag = True
             for each_option in option_candidates:
-                if is_float(qa_pair[each_option]) == False:
-                    float_flag = False
+                if each_option in qa_pair:
+                    if is_float(qa_pair[each_option]) == False:
+                        float_flag = False
             if float_flag == True:
                 qa_pair["answer_type"] = 'float'
             else:
                 qa_pair["answer_type"] = 'string'
-        return
+        return qa_info
 
     def get_qainfo(self) -> List[dict]:
         """
@@ -106,6 +116,39 @@ class SubmissionDataset(Dataset):
         assert('VLAR' in puzzle_data.keys())
         return puzzle_data['VLAR'][1:]
 
+    def select_qainfo(self) -> List[dict]:
+        selected_qainfo = []
+        for qa in tqdm(self.qa_info):
+            pid = int(qa['puzzle_id'])
+            if self.info_file[self.info_file['puzzle_id'] == pid].type.item() == self.data_args.puzzle_type:
+                selected_qainfo.append(qa)
+        return selected_qainfo
+
+    def split_qainfo(self) -> List[dict]:
+        if self.data_args.prediction_type == 'answerkey':
+            puzzle_type_list = ['logic', 'spatial', 'path']
+        elif self.data_args.prediction_type == 'answervalue':
+            puzzle_type_list = ['math', 'measure', 'algebra', 'counting', 'pattern']
+
+        selected_qainfo = []
+        for qa in tqdm(self.qa_info):
+            pid = int(qa['puzzle_id'])
+            if self.info_file[self.info_file['puzzle_id'] == pid].type.item() in puzzle_type_list:
+                selected_qainfo.append(qa)
+        return selected_qainfo
+
+    def split_qainfo_option(self) -> List[dict]:
+        selected_qainfo = []
+        if self.data_args.prediction_type == 'answerkey':
+            for qa in tqdm(self.qa_info):
+                if qa['answer_type'] == 'string':
+                    selected_qainfo.append(qa)
+        elif self.data_args.prediction_type == 'answervalue':
+            for qa in tqdm(self.qa_info):
+                if qa['answer_type'] == 'float':
+                    selected_qainfo.append(qa)
+        return selected_qainfo
+
     def load_image(self, qa_pair):
         """
             qa_pair -> 
@@ -116,32 +159,36 @@ class SubmissionDataset(Dataset):
             'Answer': 'D', 'Note': 'C(5|2)', 
             'puzzle_id': '19', 'AnswerValue': 10}
         """
-        # image_path = os.path.join(self.data_args.data_path, qa_pair["puzzle_id"], "img", qa_pair["image"])
-        image_path = os.path.join(self.image_path, qa_pair["Image"])
-        image = Image.open(image_path).convert("RGB")
-
+        if 'puzzle_id' in qa_pair:
+            image_path = os.path.join(self.image_path, qa_pair["Image"])
+        else:
+            image_path = os.path.join(self.image_path, qa_pair["Image"])
+        try:
+            image = Image.open(image_path).convert("RGB").resize((self.data_args.data_image_size, self.data_args.data_image_size), resample=Image.BICUBIC).convert("RGB") # 좌우 크기 다른 이미지 존재
+        except:
+            image = qa_pair['Image'] # tmp
         return image
 
-    def get_input_text(self, qa_pair):
+    def get_input_text(self, qa_pair, pid):
         #process input text -> this function can be developed for instruction tuning etc
         if self.data_args.prediction_type == 'answerkey':
             prompt = "Please read the following question, select the correct answer from one of the options.\n"
         elif self.data_args.prediction_type == 'answervalue':
             prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value.\n"
-        else:
-            raise NotImplementedError
+        if self.data_args.add_cot:
+            prompt = "Let’s think step by step. " + prompt
+        if self.data_args.add_puzzle_option and pid is not None:
+            # print('pid', pid)
+            cur_puzzle_type = self.info_file[self.info_file['puzzle_id'] == pid].type.item()
+            # print('cur_puzzle_type', cur_puzzle_type)
+            prompt = f"This puzzle is about {cur_puzzle_type}. " + prompt
+
+        # else:
+        #     raise NotImplementedError
 
         question = "Question : " + qa_pair["Question"] + '\n' + 'Options : ' + qa_pair["options"] + "\n" + "Answer : "
 
-        if self.data_args.use_caption:
-            image_name = qa_pair["image"]
-            caption_value = self.caption_info[image_name]["caption"]
-            caption = "Caption : " + caption_value+'\n'
-            input_text= prompt + caption + question
-        else:
-            input_text = prompt + question 
-
-        return input_text
+        return prompt + question
 
     def get_output_text(self, qa_pair):
         # Answers can be modified with multi-hop reasoning process
@@ -170,80 +217,69 @@ class SubmissionDataset(Dataset):
             qa_pair (_type_): _description_
         """
         option_values = []
-        opts_candidates=["A","B","C","D","E"]
+        opts_candidates=["A","B","C","D","E","F","G","H"]
         for option_key in opts_candidates:
-            if qa_pair["answer_type"] == "float":
-                option_values.append(float(qa_pair[option_key]))
-            else:
-                option_values.append(qa_pair[option_key])
+            if option_key in qa_pair:
+                # print('qa_pair', qa_pair) # comment by yjheo (24/05/25)
+                if qa_pair["answer_type"] == "float":
+                    option_values.append(float(qa_pair[option_key]))
+                else:
+                    option_values.append(qa_pair[option_key])
         return option_values
 
-    def get_sam_feature(self, qa_pair):
-        """
-            given single qa pair, load pre-extracted sam feature
-            sam encoder feature : [256, 1280] (vit-h)
-        """
-        image_name = qa_pair["image"].split('.png')[0]
-        single_sam_feat_path = os.path.join(self.data_args.sam_feature_path, image_name+'.npy')
-        try:
-            sam_feat = torch.tensor(np.load(single_sam_feat_path))
-        except:
-            print(f"{image_name}")
-        return sam_feat
-    
-    def check_white(self, qa_pair):
-        image_path = os.path.join(self.image_path, qa_pair["Image"])
-        low, high = Image.open(image_path).convert("L").getextrema() #range of image value
-        if low == high == 255:
-            return True
+    def option_permutation(self, qa_pair): # 문자가 규칙적이지 않음 options = 'A : 0,2 and 2, B : 1,2 and 9, C : 2, 4 and 9.' 여기서 C처럼 2, 4
+        options = qa_pair['options'][:-1]
+        keys = ['A : ', 'B : ', 'C : ', 'D : ', 'E : ', 'F : ', 'G : ', 'H : ']
+        option_keys = []
+        for key in keys:
+            if key in options:
+                option_keys.append(key[0])
+            options = options.replace(key, '<sep>')
+        options = options.replace(', <sep>', '<sep>')
+        option_values = options.split('<sep>')[1:]
+
+        if option_keys == option_values: # A : A, B : B, C : C, D : D, E : E 같은 경우
+            pass
+
         else:
-            return False
-    
-    def get_token_mask(self, qa_pair):
-        feature_path = os.path.join(self.data_args.token_mask_path, qa_pair["Image"]+'.npy')
+            if self.data_args.permutation_option == 'opt-shift':
+                options = []
+                key_list = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+                random.shuffle(option_values)
+                for i, value in enumerate(option_values):
+                    if key_list[i] in qa_pair:
+                        options.append(f'{key_list[i]} : {value}')
+                        qa_pair[key_list[i]] = value
+                        if str(value) == str(qa_pair['AnswerValue']):
+                            qa_pair['Answer'] = key_list[i]
+                    else:
+                        break
+                qa_pair['options'] = ', '.join(options)+'.'
 
-        #만약 이 feature path에 존재하지 않으면 SAM mask가 뽑히지 않았거나 완전 흰색이거나...-> 그냥 전부 attend하게끔 함
-        if not os.path.isfile(feature_path):
-            token_mask = torch.ones([257]).long()
-        else:
-            token_mask = torch.tensor(np.load(feature_path)).unsqueeze(0).long() #[1, 224, 224]
-            token_mask = F.avg_pool2d(token_mask, kernel_size=14, stride=14).squeeze(0) #[16, 16]
-            token_mask = (token_mask != 0).long()
-            token_mask = token_mask.reshape(-1) #[256]
-            token_mask = torch.cat([torch.ones([1]), token_mask])
-        
-        return token_mask #[257]
+            elif self.data_args.permutation_option == 'opt-reverse':
+                random.shuffle(options)
+                qa_pair['options'] = ', '.join(options)+'.'
 
-    def get_category_num(self, qa_pair):
-        image_name = qa_pair["Image"]  # 'puzzle_19_e_1.png', 
-        puzzle_id = qa_pair["Id"]
-        category_num = self.puzzle_2_category[puzzle_id]
-
-        return category_num #NOTE need to check dtype
+        return qa_pair
+            
 
     def __len__(self):
         return len(self.qa_info)
         
     def __getitem__(self, idx):
         single_qa_pair = self.qa_info[idx]
-        image = self.load_image(single_qa_pair)
-        text_input = self.get_input_text(single_qa_pair)
-        text_output = self.get_output_text(single_qa_pair) 
         pid = int(single_qa_pair["Id"])
+        if pid == None:
+            raise NotImplementedError
+        image = self.load_image(single_qa_pair)
+        try:
+            if self.data_args.permutation:
+                single_qa_pair = self.option_permutation(single_qa_pair)
+        except:
+            print('single_qa_pair', single_qa_pair)
+        text_input = self.get_input_text(single_qa_pair, pid)
+        text_output = self.get_output_text(single_qa_pair)
         option_values = self.get_option_values(single_qa_pair)
-
-        # for sam feature
-        if self.data_args.sam_feature_path != None:
-            sam_feature = self.get_sam_feature(single_qa_pair)
-        else:
-            sam_feature = None
-
-        if self.data_args.SAM_token_mask:
-            image_attention_mask = self.get_token_mask(single_qa_pair)
-        
-        if self.data_args.category_classification_mapping_path != None:
-            gt_category_num = self.get_category_num(single_qa_pair)
-        
         data = {
             'pixel_values' : image,
             # llm input
@@ -258,23 +294,10 @@ class SubmissionDataset(Dataset):
             # for evaluation
             'pid' : pid,
             'option_values' : option_values,
-            'answer_type' : single_qa_pair["answer_type"],
-
-            # for SAM feature experiment
-            'sam_feature' : sam_feature,
-
-            # for white background exclude
-            'is_only_white' : self.check_white(single_qa_pair), #bool
-            "image_attention_mask" : image_attention_mask if self.data_args.SAM_token_mask else None,
-            
-            # for additional category loss
-            "category_num" : gt_category_num if self.data_args.category_classification_mapping_path != None else None
+            'answer_type' : single_qa_pair["answer_type"]
         }
 
         return data
-
-
-
 
 @dataclass
 class SubmissionDataset_collator(object):
@@ -291,31 +314,22 @@ class SubmissionDataset_collator(object):
         b_text_input = []
         b_text_output = []
         b_qformer_text_input = []
-        b_sam_feature = []
-        white_image_index = []
-        token_mask_image_attention = [] if self.data_args.SAM_token_mask else None
-        b_category_gt_num = [] if self.data_args.category_classification_mapping_path != None else None
         mode = instances[0]["mode"]
 
-        for idx, each_batch in enumerate(instances):
+        for each_batch in instances:
             #qformer input
             b_pixel_values.append(each_batch["pixel_values"]) 
             b_qformer_text_input.append(each_batch["question"])
             #llm I/O
             b_text_input.append(each_batch["text_input"])
             b_text_output.append(each_batch["text_output"])
-            #sam feature
-            b_sam_feature.append(each_batch["sam_feature"])
-            if each_batch["is_only_white"]:
-                white_image_index.append(idx)
-            if self.data_args.SAM_token_mask:
-                token_mask_image_attention.append(each_batch["image_attention_mask"])
-            if self.data_args.category_classification_mapping_path != None:
-                b_category_gt_num.append(each_batch["category_num"])
 
-
-        #qformer input
-        image_input = self.processor(images=b_pixel_values, return_tensors='pt')
+        # qformer input
+        try :
+            image_input = self.processor(images=b_pixel_values, return_tensors='pt')
+        except:
+            print('b_pixel_values', b_pixel_values)
+            print('b_text_input', b_text_input)
         qformer_text_input = self.processor(text=b_qformer_text_input, padding=True, truncation=True, return_tensors='pt')
         #llm I/O 
         text_input = self.processor(text=b_text_input, padding=True, truncation=True, return_tensors='pt')
@@ -324,16 +338,10 @@ class SubmissionDataset_collator(object):
         self.processor.tokenizer.add_eos_token=True
         text_output = self.processor(text=b_text_output, padding=True, truncation=True, return_tensors='pt')
         self.processor.tokenizer.add_eos_token=False
-        #target
+        # target
         targets = text_output.input_ids.masked_fill(
-            text_output.input_ids == self.processor.tokenizer.pad_token_id, -100 
+            text_output.input_ids == self.processor.tokenizer.pad_token_id, -100
         )
-
-        #sam feature
-        b_sam_feature = torch.stack(b_sam_feature, dim=0) if b_sam_feature[0] != None else None
-        if self.data_args.SAM_token_mask:
-            token_mask_image_attention = torch.stack(token_mask_image_attention, dim=0)
-
         if mode == "train":
             inputs = {
                 "pixel_values" : image_input.pixel_values,
@@ -344,11 +352,6 @@ class SubmissionDataset_collator(object):
                 "decoder_input_ids" : None,
                 "decoder_attention_mask" : None,
                 "labels" : targets,
-                #for sam experiment
-                "sam_feature" : b_sam_feature, # if sam feature is used, torch.tensor, else None -> need to used at modeling_instructblip.py
-                "white_image_index" : white_image_index,
-                "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else None,
-                "category_gt" : torch.tensor(b_category_gt_num) if b_category_gt_num != None else None 
             }
         else:
             inputs = {
@@ -359,13 +362,6 @@ class SubmissionDataset_collator(object):
                 "input_ids" : text_input.input_ids, #t5 encoder input
                 "attention_mask" : text_input.attention_mask,
                 "labels" : targets,
-                #for sam experiment
-                "sam_feature" : b_sam_feature,
-                "white_image_index" : white_image_index,
-                "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else None,
             } 
         
         return inputs
-
-
-

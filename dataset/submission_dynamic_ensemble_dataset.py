@@ -16,10 +16,18 @@ from transformers.generation import GenerationConfig
 from torchvision.transforms import Resize  
 import torch.nn.functional as F
 import transformers
+import copy
 
 from utils.util import is_float
+from torch.nn import CosineSimilarity
 
-class SubmissionDataset(Dataset):
+
+#NOTE for classifier
+from models.basemodel import BaseModel
+from models.instructblip.processing_instructblip import InstructBlipProcessor
+from transformers import PretrainedConfig
+
+class SubmissionEnsembleDataset(Dataset):
     def __init__(self, data_args, mode, processor=None):
         super().__init__()
         assert mode in ['train', 'val', 'test']
@@ -32,6 +40,34 @@ class SubmissionDataset(Dataset):
         self.qa_info = self.get_qainfo()
         self.generate_option_key()
         self.append_prediction_type() #use for option approximation when prediction type is 'answervalue'
+        # if data_args.prediction_type == "ensemble_classify_category" and mode != "train": #NOTE 이윤지 선임님 IDEA
+        #     self.device=f"cuda:{self.data_args.local_rank}"
+        #     self.keyval_cls_processor = InstructBlipProcessor.from_pretrained(data_args.pretrained_model_path) #NOTE data_args에도 pretrained_model_path추가해야함 -> 이거 정확히 넣어야함!! offline에서도 동작되도록
+        #     model_config = PretrainedConfig.from_pretrained(data_args.load_key_ckpt_path) #NOTE data_args에도 추가되도록 해줘야함
+        #     model_config.train_mode = "False"
+        #     self.keyval_cls_model = BaseModel.from_pretrained(pretrained_model_name_or_path=data_args.load_key_ckpt_path,
+        #                                     config=model_config
+        #                                     )
+
+        #     #embedding 필요? #CPU
+        #     self.keyval_embedding = copy.deepcopy(self.keyval_cls_model.VLM.language_model.get_input_embeddings()).weight.clone().detach()
+        #     self.keyval_cls_model.to(self.device)
+        #     self.keyval_cls_model.eval()
+        #     self.cossim = CosineSimilarity(dim=1)
+        #     self.key_type_list = ['logic', 'spatial', 'path', 'counting', 'pattern']
+        #     self.value_type_list = ['math', 'measure', 'algebra']
+        #     self.puzzle_type_dict = {
+        #         "A" : "algebra",
+        #         "B" : "math", 
+        #         "C" : "counting", 
+        #         "D" : "logic",
+        #         "E" : "measure",
+        #         "F" : "path",
+        #         "G" : "pattern",
+        #         "H" : "spatial"
+        #     }
+        
+
 
         if self.data_args.use_caption:
             self.caption_info = self.load_extracted_caption()
@@ -39,6 +75,8 @@ class SubmissionDataset(Dataset):
         if self.data_args.category_classification_mapping_path != None:
             self.puzzle_2_category = self.load_category_mapping()
 
+        self.single_caption = ""
+        self.vqa_response=""
         # for evaluation metric, submission때도 b_pids은 필요해서 있어야 함
         if mode != "train":
             self.eval_infos = {
@@ -69,7 +107,7 @@ class SubmissionDataset(Dataset):
                 #prompt
                 self.vqa_prompt = f'Looking at this image, propose 3 question-answer pairs. The questions and answers should be based on the visual, locational information. Use only english.' 
                 self.caption_prompt = f'Please create a description that includes both a detailed explanation of the image and a visual element. Use only English.'
-                
+            
 
     def load_category_mapping(self):
         """
@@ -87,6 +125,19 @@ class SubmissionDataset(Dataset):
         with open(self.data_args.caption_path, 'r') as f:
             extracted_caption = json.load(f)
         return extracted_caption
+
+    def get_input_text_for_classification(self, qa_pair):
+        prompt="There are 8 question types. Based on the given image and question, select the question type from the options.\n"
+        
+        options_cls = ""
+        for each_option in ["A","B","C","D","E","F","G","H"]:
+            update_msg = f"{each_option} : {self.puzzle_type_dict[each_option]}, "
+            options_cls += update_msg
+
+        options_cls = options_cls[:-2]+'.'
+        question = "Question : " + qa_pair["Question"] + '\n' + 'Options : ' + options_cls + "\n" + "Answer : "
+
+        return prompt + question
 
     def extract_sam_decoder_feat(self, image): #NOTE : device setting
         """
@@ -170,7 +221,8 @@ class SubmissionDataset(Dataset):
                 option_values += update_msg
             qa_pair["options"] = option_values
         return
-    
+
+
     def append_prediction_type(self):
         """_summary_
             given self.qa_info, add value whether problem answer type is float/string. (For option approximation)
@@ -236,12 +288,14 @@ class SubmissionDataset(Dataset):
 
     def get_input_text(self, qa_pair):
         #process input text -> this function can be developed for instruction tuning etc
-        if self.data_args.prediction_type == 'answerkey':
-            prompt = "Please read the following question, select the correct answer from one of the options.\n"
-        elif self.data_args.prediction_type == 'answervalue':
-            prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value.\n"
-        else:
-            raise NotImplementedError
+        # if self.data_args.prediction_type == 'answerkey':
+        #     prompt = "Please read the following question, select the correct answer from one of the options.\n"
+        # elif self.data_args.prediction_type == 'answervalue':
+        #     prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value.\n"
+        # else:
+        #     raise NotImplementedError
+        key_prompt = "Please read the following question, select the correct answer from one of the options.\n"
+        value_prompt = "Please read the following question, calculate the answer value based on the provided options. You should answer only the value.\n"
 
         question = "Question : " + qa_pair["Question"] + '\n' + 'Options : ' + qa_pair["options"] + "\n" + "Answer : "
 
@@ -251,9 +305,11 @@ class SubmissionDataset(Dataset):
             caption = "Caption : " + caption_value+'\n'
             input_text= prompt + caption + question
         else:
-            input_text = prompt + question 
+            caption = "Caption : " + self.single_caption + '\n'
+            key_input_text = key_prompt + caption + question 
+            value_input_text = value_prompt + caption + question
 
-        return input_text
+        return key_input_text, value_input_text
 
     def get_output_text(self, qa_pair):
         # Answers can be modified with multi-hop reasoning process
@@ -270,6 +326,8 @@ class SubmissionDataset(Dataset):
             # else:
             #     answer = qa_pair[answer_key]
             answer = qa_pair[answer_key] #float 의미가 없는게 tokenize될때 string이어야 함
+        elif self.data_args.prediction_type=="ensemble_classify_category":
+            answer = qa_pair["Answer"]
         else:
             raise NotImplementedError
 
@@ -342,10 +400,14 @@ class SubmissionDataset(Dataset):
         #=======================================준혁===============================================
         if self.data_args.use_dynamic_caption: #NOTE : dynamic caption뽑는 부분이 text_input 만들기 전에 있어야 이를 활용함
             self.single_vqa, self.single_caption = self.make_vqa_and_caption(single_qa_pair)
-        text_input = self.get_input_text(single_qa_pair)
+        
+
+        key_text_input, value_text_input = self.get_input_text(single_qa_pair)
         text_output = self.get_output_text(single_qa_pair) 
         pid = int(single_qa_pair["Id"])
         option_values = self.get_option_values(single_qa_pair)
+
+        # keyval_pred = self.generate_keyvalue_category(image, single_qa_pair)
 
         # for sam feature
         if self.data_args.sam_feature_path != None:
@@ -364,10 +426,13 @@ class SubmissionDataset(Dataset):
         if self.data_args.category_classification_mapping_path != None:
             gt_category_num = self.get_category_num(single_qa_pair)
         
+
+        
         data = {
             'pixel_values' : image,
             # llm input
-            'text_input' : text_input, #prompt + "Question :" + question + "Answer : "
+            'key_text_input' : key_text_input, #prompt + "Question :" + question + "Answer : "
+            'value_text_input' : value_text_input,
             'text_output': text_output,
 
             # for qformer instruction input
@@ -386,6 +451,8 @@ class SubmissionDataset(Dataset):
             # for white background exclude
             'is_only_white' : self.check_white(single_qa_pair), #bool
             "image_attention_mask" : image_attention_mask if self.data_args.SAM_token_mask else None,
+
+            # "keyval_pred" : keyval_pred,
             
             # for additional category loss
             "category_num" : gt_category_num if self.data_args.category_classification_mapping_path != None else None
@@ -397,7 +464,7 @@ class SubmissionDataset(Dataset):
 
 
 @dataclass
-class SubmissionDataset_collator(object):
+class SubmissionEnsembleDataset_collator(object):
     """Collate examples for supervised fine-tuning."""
     """
         flant5의 경우, input : text, output : text + eos token만 붙히면 나머지는 t5안에서 처리를 해준다. 
@@ -408,13 +475,16 @@ class SubmissionDataset_collator(object):
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         b_pixel_values = []
-        b_text_input = []
+        b_key_text_input = []
+        b_value_text_input = []
         b_text_output = []
         b_qformer_text_input = []
         b_sam_feature = []
         white_image_index = []
         token_mask_image_attention = [] if self.data_args.SAM_token_mask else None
         b_category_gt_num = [] if self.data_args.category_classification_mapping_path != None else None
+        # b_keyval_pred = []
+        b_text_question = []
         mode = instances[0]["mode"]
 
         for idx, each_batch in enumerate(instances):
@@ -422,10 +492,15 @@ class SubmissionDataset_collator(object):
             b_pixel_values.append(each_batch["pixel_values"]) 
             b_qformer_text_input.append(each_batch["question"])
             #llm I/O
-            b_text_input.append(each_batch["text_input"])
+            b_key_text_input.append(each_batch["key_text_input"])
+            b_value_text_input.append(each_batch["value_text_input"])
             b_text_output.append(each_batch["text_output"])
             #sam feature
             b_sam_feature.append(each_batch["sam_feature"])
+
+            b_text_question.append(each_batch["question"])
+
+            # b_keyval_pred.append(each_batch["keyval_pred"])
             if each_batch["is_only_white"]:
                 white_image_index.append(idx)
             if self.data_args.SAM_token_mask:
@@ -438,7 +513,8 @@ class SubmissionDataset_collator(object):
         image_input = self.processor(images=b_pixel_values, return_tensors='pt')
         qformer_text_input = self.processor(text=b_qformer_text_input, padding=True, truncation=True, return_tensors='pt')
         #llm I/O 
-        text_input = self.processor(text=b_text_input, padding=True, truncation=True, return_tensors='pt')
+        key_text_input = self.processor(text=b_key_text_input, padding=True, truncation=True, return_tensors='pt')
+        value_text_input = self.processor(text=b_value_text_input, padding=True, truncation=True, return_tensors='pt')
         #flant5은 항상 right padding이기에 train/test에 따라 padding side신경쓸 필요없음
         #대신 output에 eos token을 끝에 붙혀야하기에 이 부분만 조절
         self.processor.tokenizer.add_eos_token=True
@@ -459,8 +535,10 @@ class SubmissionDataset_collator(object):
                 "pixel_values" : image_input.pixel_values,
                 "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
                 "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
-                "input_ids" : text_input.input_ids,
-                "attention_mask" : text_input.attention_mask,
+                "key_input_ids" : key_text_input.input_ids,
+                "key_attention_mask" : key_text_input.attention_mask,
+                "value_input_ids" : value_text_input.input_ids,
+                "value_attention_mask" : value_text_input.attention_mask,
                 "decoder_input_ids" : None,
                 "decoder_attention_mask" : None,
                 "labels" : targets,
@@ -468,7 +546,9 @@ class SubmissionDataset_collator(object):
                 "sam_feature" : b_sam_feature, # if sam feature is used, torch.tensor, else None -> need to used at modeling_instructblip.py
                 "white_image_index" : white_image_index,
                 "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else None,
-                "category_gt" : torch.tensor(b_category_gt_num) if b_category_gt_num != None else None 
+                "category_gt" : torch.tensor(b_category_gt_num) if b_category_gt_num != None else None,
+                # "keyval_pred" : b_keyval_pred
+                "question" : b_text_question
             }
         else:
             inputs = {
@@ -476,13 +556,17 @@ class SubmissionDataset_collator(object):
                 "qformer_input_ids" : qformer_text_input["qformer_input_ids"],
                 "qformer_attention_mask" : qformer_text_input["qformer_attention_mask"],
                 # for generation, need different input_ids and att_mask
-                "input_ids" : text_input.input_ids, #t5 encoder input
-                "attention_mask" : text_input.attention_mask,
+                "key_input_ids" : key_text_input.input_ids,
+                "key_attention_mask" : key_text_input.attention_mask,
+                "value_input_ids" : value_text_input.input_ids,
+                "value_attention_mask" : value_text_input.attention_mask,
                 "labels" : targets,
                 #for sam experiment
                 "sam_feature" : b_sam_feature,
                 "white_image_index" : white_image_index,
                 "image_attention_mask" : token_mask_image_attention if self.data_args.SAM_token_mask else None,
+                # "keyval_pred" : b_keyval_pred
+                "question" : b_text_question
             } 
         
         return inputs

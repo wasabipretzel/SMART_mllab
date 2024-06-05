@@ -4,12 +4,18 @@
 """
 from typing import Dict, Optional, Sequence, List
 from transformers import PretrainedConfig, GenerationConfig
+from transformers import AutoImageProcessor, AutoProcessor, AutoModelForImageClassification, AutoModelForZeroShotImageClassification, AutoModelForVision2Seq
 
 from models.basemodel import BaseModel
+from models.submission_model import SubmissionModel
 from models.instructblip.processing_instructblip import InstructBlipProcessor
-from models.cls_model import VisualClassifier
+
+from transformers import AutoProcessor, BitsAndBytesConfig
 
 from models.smart_basemodel import SMART_Net
+
+from peft import LoraConfig, get_peft_model
+import torch
 
 
 #TODO : model from pretrained 상황인 경우? resume_from_checkpoints..
@@ -27,10 +33,13 @@ def get_model(model_args, training_args):
         _type_: initialized model or processor
     """
     if "instructblip" in model_args.model_type:
-        if training_args.load_ckpt_path == None:
+        if training_args.load_ckpt_path == None and training_args.load_key_ckpt_path == None:
             model_args.train_mode=True
             processor = InstructBlipProcessor.from_pretrained(model_args.pretrained_model_path)
             model = BaseModel(model_args).to(training_args.device)
+        elif training_args.class_ensemble:
+            processor = InstructBlipProcessor.from_pretrained(model_args.pretrained_model_path)
+            model = SubmissionModel(model_args, training_args).eval().to(training_args.device)
         else:
             processor = InstructBlipProcessor.from_pretrained(model_args.pretrained_model_path)
             model_config = PretrainedConfig.from_pretrained(training_args.load_ckpt_path)
@@ -38,39 +47,7 @@ def get_model(model_args, training_args):
             model = BaseModel.from_pretrained(pretrained_model_name_or_path=training_args.load_ckpt_path,
                                             config=model_config
                                             ).to(training_args.device)
-    elif model_args.model_type == "R50_BERT":
-        from torchvision.models import ResNet50_Weights, resnet50
-        weights = ResNet50_Weights.DEFAULT
-        vision_model = resnet50(weights=weights)
-        processor = weights.transforms()
-        if model_args.smart_starter_pretrained_path != None:
-            checkpoint = torch.load(args.smart_starter_pretrained_path, map_location="cpu")
-            state_dict = checkpoint["state_dict"]
-            for k in list(state_dict.keys()):
-                # retain only encoder up to before the embedding layer
-                if k.startswith("module.encoder") and not k.startswith("module.encoder.fc"):
-                    # remove prefix
-                    state_dict[k[len("module.encoder.") :]] = state_dict[k]
-                # delete renamed or unused k
-                del state_dict[k]
 
-            msg = vision_model.load_state_dict(state_dict, strict=False)
-            assert set(msg.missing_keys) == {"fc.weight", "fc.bias"}
-        
-        model = SMART_Net(vision_model)
-    elif model_args.model_type == "visual_classifier":
-        if training_args.load_ckpt_path == None:
-            model_args.train_mode = True
-            processor = InstructBlipProcessor.from_pretrained(model_args.pretrained_model_path)
-            model = VisualClassifier(model_args).to(training_args.device)
-        else:
-            processor = InstructBlipProcessor.from_pretrained(model_args.pretrained_model_path)
-            model_config = PretrainedConfig.from_pretrained(training_args.load_ckpt_path)
-            model_config.train_mode=False
-            model = VisualClassifier.from_pretrained(
-                pretrained_model_name_or_path=training_args.load_ckpt_path,
-                config=model_config,
-            ).to(training_args.device)
     else:
         raise NotImplementedError
 

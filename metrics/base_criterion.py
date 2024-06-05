@@ -13,16 +13,22 @@ class ComputeMetricAnswerKey:
 
     tokenizer: transformers.PreTrainedTokenizer
     vicuna_embedding: transformers.PreTrainedModel
-    eval_infos: dict
+    eval_dataset: torch.utils.data.Dataset
     puzzle_path: str
 
     def __post_init__(self):
 
         self.vicuna_embedding=self.vicuna_embedding.weight.clone().detach()
 
-        self.b_options = self.eval_infos["option_values"]
-        self.b_answer_type = self.eval_infos["answer_type"]
-        self.b_pids = self.eval_infos["pid"]
+        b_options, b_answer_type, b_pids = [], [], []
+        for i, data in enumerate(self.eval_dataset):
+            b_options.append(data["option_values"])
+            b_answer_type.append(data["answer_type"])
+            b_pids.append(data["pid"])
+        
+        self.b_options = b_options
+        self.b_answer_type = b_answer_type
+        self.b_pids = b_pids
 
         """
         EvalPrediction(predictions=preds, label_ids=label_ids, inputs=inputs_ids)
@@ -66,18 +72,13 @@ class ComputeMetricAnswerKey:
         pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
         pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
 
-        if pred.category_predictions != None:
-            correct_category_preds = pred.category_predictions.sum().item() #[True, False ...]
-            category_accuracy = correct_category_preds / pred.category_predictions.shape[0]
-        else:
-            category_accuracy=None
-            
+
+        
         #위의 값들이 detach되어있는지 확인할 것
         # tokenizing 시 맨 앞 bos token안붙히게 할 것
         self.tokenizer.add_bos_token=False
         non_approximated_pred = []
         approximated_pred = [] # List[bool] : len=num test samples (근사하고 맞았는지 틀렸는지)
-        print(f"pred answer list : {len(pred_answer_list)}")
         for idx, each_pred in enumerate(pred_answer_list):
             each_pred = str(each_pred).strip() #생성 답에 '4\n'이런게 있음 
             gt_answer = gt_answer_list[idx]
@@ -107,7 +108,7 @@ class ComputeMetricAnswerKey:
 
         
         assert len(approximated_pred) == len(pred_answer_list) == pred.predictions.shape[0]
-        print(f"non approximated pred : {len(non_approximated_pred)}")
+
         #calculate s_acc/o_acc & puzzle_id 
         tot_samples_num = pred.predictions.shape[0]
         puzzle_acc = {}
@@ -149,15 +150,14 @@ class ComputeMetricAnswerKey:
 
         metrics = {
             "S_acc" : np.array(non_approximated_pred).sum()*100 / tot_samples_num,
-            "O_acc" : np.array(approximated_pred).sum()*100 / tot_samples_num,
+            "O_acc" : np.array(approximated_pred).sum()*100 / tot_samples_num
         }
         #result에 class별 s_acc / o_acc append 혹은 update 
         for each_class in classes:
             metrics[f"{each_class}_acc"] = class_avg_perf[each_class][0]
             metrics[f"{each_class}_oacc"] = class_avg_perf[each_class][1]
 
-        #category acc
-        metrics[f"category_acc"] = category_accuracy
+
         #TODO : 위에서 맞춘것 제대로 돌아가면 submission json형태로도 만들어야함 
         # ("A", "B" .. 이런식으로 approximate된것을 다시 string으로 바꿔서 내보내야함 -> class method function으로생성하게끔하자
 
@@ -175,16 +175,22 @@ class ComputeMetricAnswerValue:
     
     tokenizer: transformers.PreTrainedTokenizer
     vicuna_embedding: transformers.PreTrainedModel
-    eval_infos: dict
+    eval_dataset: torch.utils.data.Dataset
     puzzle_path: str
 
     def __post_init__(self):
 
         self.vicuna_embedding=self.vicuna_embedding.weight.clone().detach()
 
-        self.b_options = self.eval_infos["option_values"]
-        self.b_answer_type = self.eval_infos["answer_type"]
-        self.b_pids = self.eval_infos["pid"]
+        b_options, b_answer_type, b_pids = [], [], []
+        for i, data in enumerate(self.eval_dataset):
+            b_options.append(data["option_values"])
+            b_answer_type.append(data["answer_type"])
+            b_pids.append(data["pid"])
+        
+        self.b_options = b_options
+        self.b_answer_type = b_answer_type
+        self.b_pids = b_pids
 
         """
         EvalPrediction(predictions=preds, label_ids=label_ids, inputs=inputs_ids)
@@ -221,12 +227,6 @@ class ComputeMetricAnswerValue:
         pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
         pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
 
-        if pred.category_predictions != None:
-            correct_category_preds = pred.category_predictions.sum().item() #[True, False ...]
-            category_accuracy = correct_category_preds / pred.category_predictions.shape[0]
-        else:
-            category_accuracy=None
-        
         #위의 값들이 detach되어있는지 확인할 것
         # tokenizing 시 맨 앞 bos token안붙히게 할 것
         self.tokenizer.add_bos_token=False
@@ -327,168 +327,6 @@ class ComputeMetricAnswerValue:
         for each_class in classes:
             metrics[f"{each_class}_acc"] = class_avg_perf[each_class][0]
             metrics[f"{each_class}_oacc"] = class_avg_perf[each_class][1]
-    
-        #category acc
-        metrics[f"category_acc"] = category_accuracy
-
-        #원상복구
-        self.tokenizer.add_bos_token=True
-
-        return metrics
-
-    
-    def make_submission_json(self):
-        return
-
-
-
-@dataclass
-class ComputeMetricAnswerAll:
-    """
-        "A : 7" -> 그냥 sentence embedding
-    """
-    
-    tokenizer: transformers.PreTrainedTokenizer
-    vicuna_embedding: transformers.PreTrainedModel
-    eval_infos: dict
-    puzzle_path: str
-
-    def __post_init__(self):
-
-        self.vicuna_embedding=self.vicuna_embedding.weight.clone().detach()
-
-        self.b_options = self.eval_infos["option_values"]
-        self.b_answer_type = self.eval_infos["answer_type"]
-        self.b_pids = self.eval_infos["pid"]
-
-        """
-        EvalPrediction(predictions=preds, label_ids=label_ids, inputs=inputs_ids)
-            get all logits, labels after all eval_step
-        pred.predictions (얘가 맞는듯) (300, 182)
-        pred.label_ids  (얜 죄다 -100) (300, 124)
-            predictions (`np.ndarray`): Predictions of the model.
-            label_ids (`np.ndarray`): Targets to be matched.
-        tokenizer을 넣어줘야하는듯. 
-        """
-        self.candidates = ["A","B","C","D","E"]
-        self.cossim = CosineSimilarity(dim=1)
-        self.puzzles = read_dataset_info(self.puzzle_path) #TODO remove hard coding
-    # method
-    # 1. pred 같이 밀어올리는 부분은 self.qa_info의 answer type, options(option들의 값), pids 
-    # 2. pred.predictions을 pad_token_id제외하고 batch_decode
-    # 3. answer_list만들고 for문돌면서 float가능한지 아니면 str로 분류해야하는지 판단
-    # 4. (1) 만약 pred값이랑 answer value랑 같아 -> s_acc을 위해 cache.
-    #    (2) 다른 경우 : 만약 problem도 float고 pred도 float면 distance기반 option approximate
-    #    (3) problem이랑 상관없이 pred가 string이면 embedding approximate
-    #    (4) argmax해서 가장 유사한 답안으로 pred을 다시 만들기 
-    # 5. pred값으로 s_acc구하고 o_acc도 구하기 + puzzle별로 + class별로도 구하기 
-
-    # cf) puzzle metric, 등등을 위해 csv 읽어서 올려야함 
-    def compute_metrics(self, pred):
-        #b_options : nested list of [test_samples, 5]
-        #b_answer_type : List[str] (len:num test samples)
-        #b_pids : List[str] (len: num test samples)
-        #method 1
-        #method 2
-        pred.label_ids[pred.label_ids == -100] = self.tokenizer.pad_token_id #fill -100 index with pad_token_id (preventing index/overflow error)
-        gt_answer_list = self.tokenizer.batch_decode(pred.label_ids, skip_special_tokens=True) #get rid of pad tokens
-
-        pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
-        pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
-
-        if pred.category_predictions != None:
-            correct_category_preds = pred.category_predictions.sum().item() #[True, False ...]
-            category_accuracy = correct_category_preds / pred.category_predictions.shape[0]
-        else:
-            category_accuracy=None
-        
-        #위의 값들이 detach되어있는지 확인할 것
-        # tokenizing 시 맨 앞 bos token안붙히게 할 것
-        self.tokenizer.add_bos_token=False
-        non_approximated_pred = []
-        approximated_pred = [] # List[bool] : len=num test samples (근사하고 맞았는지 틀렸는지)
-
-        # 1. option value들을 "A : 3" 이런식으로 재구성해주기
-        for idx, each_pred in enumerate(pred_answer_list):
-            each_pred = each_pred.strip() #생성 답에 '4\n'이런게 있음 
-            #method 3
-            problem_answer_type = self.b_answer_type[idx] #'string' or 'float'
-
-
-            #gt preprocessing
-            gt_answer = gt_answer_list[idx].strip()
-            gt_key = gt_answer.split(" : ")[0]  #-> "A" or "B" ..
-
-            #option preprocessing
-            each_options = []
-            for each_key, each_option_val in zip(self.candidates, self.b_options[idx]):
-                each_options.append(f"{each_key} : {each_option_val}")
-
-            option_tokenized = self.tokenizer(text = each_options, padding=True, truncation=False, return_tensors="pt").input_ids.long() #[5, seqlen, 4096]
-            option_embedded = self.vicuna_embedding[option_tokenized].mean(axis=1) #[5, 4096]
-
-            each_pred = str(each_pred)
-            each_pred_tokenized = self.tokenizer(text=each_pred, padding=True, truncation=False, return_tensors="pt").input_ids.long() #[1, seqlen, 4096]
-            each_pred_embedded = self.vicuna_embedding[each_pred_tokenized].mean(axis=1) #[1, 4096]
-
-            approximated_option_index = self.cossim(option_embedded, each_pred_embedded).argmax(dim=0)
-            result_option_key = each_options[approximated_option_index].split(" : ")[0]
-
-            result = (result_option_key == gt_key)
-            approximated_pred.append(result)
-            non_approximated_pred.append(result)
-
-        assert len(approximated_pred) == len(pred_answer_list) == pred.predictions.shape[0]
-        #calculate s_acc/o_acc & puzzle_id 
-        tot_samples_num = pred.predictions.shape[0]
-        puzzle_acc = {}
-        for t in list(set(self.b_pids)):
-            puzzle_acc[str(t)] = [
-                np.array(non_approximated_pred)[np.array(self.b_pids) == t].sum(),
-                np.array(approximated_pred)[np.array(self.b_pids) == t].sum(),
-                (np.array(self.b_pids) == t).sum()
-            ]
-
-        to_int = lambda x: np.array(list(x)).astype("int")
-        cls_mean = lambda x, idx, pids: np.array([x[int(ii)] for ii in idx]).sum() / len(
-            set(to_int(idx)).intersection(set(to_int(pids)))
-        )
-        acc_list = np.zeros(101+1)
-        opt_acc_list = np.zeros(101+1)
-        for puzzle_id in puzzle_acc.keys():
-            acc = 100.0 * puzzle_acc[puzzle_id][0] / puzzle_acc[puzzle_id][2]
-            oacc = 100.0 * puzzle_acc[puzzle_id][1] / puzzle_acc[puzzle_id][2]
-            acc_list[int(puzzle_id)] = acc
-            opt_acc_list[int(puzzle_id)] = oacc
-        #print acc, opt_acc by puzzle id
-        for t in range(1, 101+1):
-            print("%d opt_acc(%%)=%0.2f acc(%%)=%0.2f" % (t, opt_acc_list[t], acc_list[t]), end="\t")
-            if t % 5 == 0:
-                print("\n")
-        print("\n\n")
-        class_avg_perf = {}
-        classes = ["counting", "math", "logic", "path", "algebra", "measure", "spatial", "pattern"]
-        print(classes)
-        for each_class in classes:
-            idx_list = self.puzzles[each_class]
-            class_avg_perf[each_class] = (
-                cls_mean(acc_list, idx_list, list(puzzle_acc.keys())),
-                cls_mean(opt_acc_list, idx_list, list(puzzle_acc.keys())),
-            )
-            print("%0.1f/%0.1f & " % (class_avg_perf[each_class][0], class_avg_perf[each_class][1]), end=" ")
-        print("\n\n")
-
-        metrics = {
-            "S_acc" : np.array(non_approximated_pred).sum()*100 / tot_samples_num,
-            "O_acc" : np.array(approximated_pred).sum()*100 / tot_samples_num
-        }
-        #result에 class별 s_acc / o_acc append 혹은 update 
-        for each_class in classes:
-            metrics[f"{each_class}_acc"] = class_avg_perf[each_class][0]
-            metrics[f"{each_class}_oacc"] = class_avg_perf[each_class][1]
-    
-        #category acc
-        metrics[f"category_acc"] = category_accuracy
 
         #원상복구
         self.tokenizer.add_bos_token=True

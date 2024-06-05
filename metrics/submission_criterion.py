@@ -19,7 +19,7 @@ class SubmissionCriterionAnswerKey:
     def __post_init__(self):
 
         self.vicuna_embedding=self.vicuna_embedding.weight.clone().detach()
-        
+
         self.b_options = self.eval_infos["option_values"]
         self.b_answer_type = self.eval_infos["answer_type"]
         self.b_pids = self.eval_infos["pid"]
@@ -227,14 +227,29 @@ class SubmissionCriterionAnswerValue:
 
         return metrics
 
-    
-    def make_submission_json(self):
-        return
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 @dataclass
-class SubmissionCriterionAnswerAll:
-    
+class SubmissionCriterionEnsemble:
+
     tokenizer: transformers.PreTrainedTokenizer
     vicuna_embedding: transformers.PreTrainedModel
     eval_infos: dict
@@ -257,7 +272,14 @@ class SubmissionCriterionAnswerAll:
             label_ids (`np.ndarray`): Targets to be matched.
         tokenizer을 넣어줘야하는듯. 
         """
-        self.candidates = ["A","B","C","D","E"]
+        self.lower_candidates = {
+            "a" : "A",
+            "b" : "B",
+            "c" : "C",
+            "d" : "D",
+            "e" : "E"
+        }
+        # self.candidates = ["A","B","C","D","E"]
         self.cossim = CosineSimilarity(dim=1)
     # method
     # 1. pred 같이 밀어올리는 부분은 self.qa_info의 answer type, options(option들의 값), pids 
@@ -271,6 +293,7 @@ class SubmissionCriterionAnswerAll:
 
     # cf) puzzle metric, 등등을 위해 csv 읽어서 올려야함 
     def compute_metrics(self, pred):
+        breakpoint()
         #b_options : nested list of [test_samples, 5]
         #b_answer_type : List[str] (len:num test samples)
         #b_pids : List[str] (len: num test samples)
@@ -281,29 +304,89 @@ class SubmissionCriterionAnswerAll:
 
         pred.predictions[pred.predictions == -100] = self.tokenizer.pad_token_id
         pred_answer_list = self.tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
-        
+
+        # NOTE :  이거 list인지 확인
+        keyval_class = pred.keyval_class
         #위의 값들이 detach되어있는지 확인할 것
         # tokenizing 시 맨 앞 bos token안붙히게 할 것
         self.tokenizer.add_bos_token=False
-        approximated_answer = []
-        # 1. option value들을 "A : 3" 이런식으로 재구성해주기
+        non_approximated_pred = []
+        approximated_pred = [] # List[bool] : len=num test samples (근사하고 맞았는지 틀렸는지)
+        approximated_answer_list = [] #List[str] : 실제 답으로 선정할 option key 값
+        print(f"pred answer list : {len(pred_answer_list)}")
         for idx, each_pred in enumerate(pred_answer_list):
-            each_pred = each_pred.strip() #생성 답에 '4\n'이런게 있음 
-            #method 3
-            problem_answer_type = self.b_answer_type[idx] #'string' or 'float'
-
-
-            #gt preprocessing
-            gt_answer = gt_answer_list[idx].strip()
-            gt_key = gt_answer.split(" : ")[0]  #-> "A" or "B" ..
-
-            #option preprocessing
-            each_options = []
-            for each_key, each_option_val in zip(self.candidates, self.b_options[idx]):
-                each_options.append(f"{each_key} : {each_option_val}")
+            each_pred = str(each_pred).strip() #생성 답에 '4\n'이런게 있음 
+            gt_answer = gt_answer_list[idx]
             
+            keyval = keyval_class[idx]
 
+            if keyval == "key":
+                approximated_answer = self.compute_key_criterion(each_pred)
+            else:
+                option_value = self.b_options[idx]
+                approximated_answer = self.compute_value_criterion(each_pred, idx)
+            
+            approximated_answer_list.append(approximated_answer)
+
+        assert len(approximated_answer_list) == pred.predictions.shape[0]
+
+        metrics = {
+            "predicted_answers" : approximated_answer_list,
+            "pids" : self.b_pids
+        }
+        #원상복구
+        self.tokenizer.add_bos_token=True
+
+        return metrics
+
+
+
+    def compute_key_criterion(self, each_pred): #NOTE : 여기안에서 gt_answer이 어떤 식으로 들어오지???
+        each_pred = str(each_pred).strip() #생성 답에 '4\n'이런게 있음 
+        #problem answer type에 상관없이 답이 ABCD가 아니다 -> embedding기반으로 비교
+        #소문자인경우 대문자로 변경
+        if each_pred in self.lower_candidates.keys():
+            each_pred = self.lower_candidates[each_pred]
+        
+        #approximation
+        #'A','B','C','D','E' 와 비교
+        option_value = ['A','B','C','D','E']
+        option_tokenized = self.tokenizer(text = option_value, padding=True, truncation=False, return_tensors="pt").input_ids.long() #[5, seqlen, 4096]
+        #NOTE : padding시 padding token의 embedding은 어떻게 되는지 보기
+        option_embedded = self.vicuna_embedding[option_tokenized].mean(axis=1) #[5, 4096]
+
+        each_pred_tokenized = self.tokenizer(text=each_pred, padding=True, truncation=False, return_tensors="pt").input_ids.long() #[1, seqlen, 4096]
+        each_pred_embedded = self.vicuna_embedding[each_pred_tokenized].mean(axis=1) #[1, 4096]
+
+        approximated_option_index = self.cossim(option_embedded, each_pred_embedded).argmax(dim=0)
+        approximated_answer = option_value[approximated_option_index]
+
+        return approximated_answer
+
+
+    def compute_value_criterion(self, each_pred, idx):
+        answer_key = ["A","B","C","D","E"]
+        problem_answer_type = self.b_answer_type[idx] #'string' or 'float'
+
+        float_flag= is_float(each_pred)
+        #pred val preprocessing
+        if float_flag:
+            each_pred = float(each_pred)
+        else:
+            each_pred = each_pred.strip()
+  
+        #method 4.2
+        if problem_answer_type=='float' and float_flag:
+            option_value = self.b_options[idx] #[1, 5]
+            approximated_index = np.abs(np.array(option_value).astype("float") - torch.tensor(each_pred).unsqueeze(0).numpy()).argmin(axis=0)
+            approximated_answer = answer_key[approximated_index]
+        else:
+            #둘 중 하나라도 string인 경우
+            #method 4.3
+            option_value = self.b_options[idx]
+            option_value = [str(opt_val) for opt_val in option_value] #pred가 str이고 option 이 float인경우 안하면 tokenizer에서 문제가 생김
             option_tokenized = self.tokenizer(text = option_value, padding=True, truncation=False, return_tensors="pt").input_ids.long() #[5, seqlen, 4096]
+            #NOTE : padding시 padding token의 embedding은 어떻게 되는지 보기
             option_embedded = self.vicuna_embedding[option_tokenized].mean(axis=1) #[5, 4096]
 
             each_pred = str(each_pred)
@@ -311,21 +394,6 @@ class SubmissionCriterionAnswerAll:
             each_pred_embedded = self.vicuna_embedding[each_pred_tokenized].mean(axis=1) #[1, 4096]
 
             approximated_option_index = self.cossim(option_embedded, each_pred_embedded).argmax(dim=0)
-            result_option_key = each_options[approximated_option_index].split(" : ")[0]
 
-            approximated_answer.append(result_option_key)
-        
-
-        metrics = {
-            "predicted_answers" : approximated_answer,
-            "pids" : self.b_pids
-        }
-        
-        #원상복구
-        self.tokenizer.add_bos_token=True
-
-        return metrics
-
-    
-    def make_submission_json(self):
-        return
+            approximated_answer = answer_key[approximated_option_index]
+        return approximated_answer
