@@ -69,7 +69,6 @@ dependencies:
     - nvidia-nvjitlink-cu12==12.4.99
     - nvidia-nvtx-cu12==12.1.105
     - omegaconf==2.3.0
-    - opencv-python==4.9.0.80
     - packaging==24.0
     - pandas==2.2.1
     - peft==0.10.0
@@ -94,11 +93,11 @@ dependencies:
     - smmap==5.0.1
     - sympy==1.12
     - threadpoolctl==3.4.0
-    - tokenizers==0.19.1
+    - tokenizers==0.15.2
     - torch==2.2.2
     - torchvision==0.17.2
     - tqdm==4.66.2
-    - transformers==4.40.2
+    - transformers==4.37.2
     - triton==2.2.0
     - typing-extensions==4.10.0
     - tzdata==2024.1

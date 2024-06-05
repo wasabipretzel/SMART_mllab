@@ -22,6 +22,8 @@ from metrics.build_metric import get_metric
 from dataset.build_dataset import get_dataset
 from utils.util import count_parameters, NoWarningFilter
 
+from trainers.submission_trainer import SubmissionTrainer
+
 local_rank = None
 logger = logging.get_logger("transformers")
 for handler in logger.handlers:
@@ -69,7 +71,9 @@ def submit_challenge():
 
     set_seed(training_args.seed)
     local_rank = training_args.local_rank
-    
+    data_args.local_rank = local_rank
+    data_args.pretrained_model_path = model_args.pretrained_model_path
+    data_args.load_key_ckpt_path = training_args.load_key_ckpt_path
     if training_args.should_log:
         # The default of training_args.log_level is passive, so we set log level at info here to have that default.
         transformers.utils.logging.set_verbosity_info()
@@ -84,15 +88,22 @@ def submit_challenge():
     ## DataLoader
     data_module = get_dataset(model_args, data_args, mode, processor=processor)
 
-    embeddings = copy.deepcopy(model.VLM.language_model.get_input_embeddings())
-    metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"])
+    embeddings = copy.deepcopy(model.keymodel.VLM.language_model.get_input_embeddings())
+    metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"].eval_infos)
 
-    trainer = Seq2SeqTrainer(model=model,
+
+    trainer = SubmissionTrainer(model=model,
                     args=training_args,
                     compute_metrics=metric.compute_metrics,
                     data_collator = data_module["data_collator"],
                     tokenizer=processor.tokenizer if "instructblip" in model_args.model_type else None,
-                    )
+    )
+    # trainer = Seq2SeqTrainer(model=model,
+    #                 args=training_args,
+    #                 compute_metrics=metric.compute_metrics,
+    #                 data_collator = data_module["data_collator"],
+    #                 tokenizer=processor.tokenizer if "instructblip" in model_args.model_type else None,
+    #                 )
 
 
     predictions, labels, metrics = trainer.predict(test_dataset=data_module["eval_dataset"])

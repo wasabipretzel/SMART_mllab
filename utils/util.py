@@ -328,80 +328,13 @@ def bertemb_test():
 
 
     breakpoint()
-
-
+    
     
 
-def check_white():
-    import PIL
-    from PIL import Image
-    import tqdm
-    base_path = "/data/SMART101-release-v1/SMART101-Data"
-
-    #원래 총 image list
-    origin_image_list = []
-    for (root, dirs, files) in os.walk(base_path):
-            if len(files) > 0:
-                for file_name in files:
-                    if 'png' in file_name:
-                        origin_image_list.append(os.path.join(root,file_name))
-    
-    white_cnt = 0
-    for each_image_path in tqdm.tqdm(origin_image_list, total=len(origin_image_list)):
-        low, high = Image.open(each_image_path).convert("L").getextrema() #range of image value
-        if low == high == 255:
-            white_cnt += 1
-    
-    print(f"total : {white_cnt}")
-    return
 
 
-
-def get_category_mapping():
-    """
-        category_mapping : {
-            "pattern" : 0,
-            "logic" : 1,
-            ... (7번까지 존재)
-        }
-
-        mapping_dict : {
-            puzzle_id : category_id (0 ~ 7 중 하나)
-        }
-    """
-    base_path = "/data/SMART101-release-v1/puzzle_type_info.csv"
-
-    import pandas as pd 
-
-    data = pd.read_csv(base_path)
-
-    #create category class mapping
-    unique_category_list = list(set(data.type.tolist()))
-    category_mapping = {}
-    for class_num, cat_name in enumerate(unique_category_list):
-        category_mapping[cat_name] = class_num
-
-    mapping_dict = {}
-    for idx in range(data.shape[0]):
-        puzzle_id = data.iloc[idx]["puzzle_id"]
-        category = data.iloc[idx]["type"]
-        mapping_dict[str(puzzle_id)] = category_mapping[category]
-    
-    import json
-    save_path = "/data/category_mapping"
-
-    #save category class mapping
-    with open(os.path.join(save_path, "category_2_num_mapping.json"), 'w') as f:
-        json.dump(category_mapping, f)
-    # save mapping dict
-    with open(os.path.join(save_path, "puzzle_2_categorynum_mapping.json"), 'w') as f:
-        json.dump(mapping_dict, f)
-
-    breakpoint()
 
 # if __name__ == '__main__':
-    # get_category_mapping()
-#     check_white()
-# #     # value = 3.0
-# #     # print(convert_to_number(value))
-# #     bertemb_test()
+#     # value = 3.0
+#     # print(convert_to_number(value))
+#     bertemb_test()

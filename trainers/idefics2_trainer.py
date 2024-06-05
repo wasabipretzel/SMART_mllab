@@ -6,7 +6,7 @@ from typing import Dict
 from transformers import Seq2SeqTrainer
 import torch 
 
-class InstructblipTrainer(Seq2SeqTrainer):
+class idefics2_trainer(Seq2SeqTrainer):
 
     def create_optimizer(self):
         """
