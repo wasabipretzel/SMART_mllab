@@ -80,8 +80,9 @@ python /home/work/instructblip/SMART_llm/train.py \
     --lr_scheduler_type cosine \
     --dataloader_num_workers 4 \
     --project_name SMART_challenge \
-    --run_name instructblip_llm_only \
-    --report_to wandb
+    --run_name instructblip_llm_only_38 \
+    --test_puzzle_num 9 \
+    --report_to None
 
 
 

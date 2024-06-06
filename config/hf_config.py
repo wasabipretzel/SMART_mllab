@@ -60,6 +60,7 @@ class DataArguments:
     data_path: str="/home/work/instructblip/data/SMART101-release-v1/SMART101-Data"
     puzzle_path: str="/home/work/instructblip/data/SMART101-release-v1/puzzle_type_info.csv"
 
+    test_puzzle_num: str="38"
 
     # num_class: int=91
     prediction_type: str=field(default="answerkey") #could be ["answerkey","answervalue"]. answerkey predict one of 'A','B','C','D','E'. answervalue predict float/str value
