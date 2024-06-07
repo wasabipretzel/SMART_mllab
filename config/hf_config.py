@@ -82,7 +82,7 @@ class TrainingArguments(Seq2SeqTrainingArguments):
     project_name: str=field(default="smart_challenge")
     label_names: List[str]=field(default_factory=partial(list, ["labels"]))
     # load_ckpt_path: str=field(default=None)
-    llm_load_ckpt_path: str=field(default=None)
+    llm_load_ckpt_path: str=field(default=None) 
     seed: int=42
     should_log: bool=True
     ddp_find_unused_parameters: bool=False

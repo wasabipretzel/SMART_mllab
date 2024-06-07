@@ -78,8 +78,11 @@ class Flant5Dataset(Dataset):
             qa_info = pkl.load(f)
         # white 이미지만 거르기 (9, 30, 38, 47, 89, 91) # 일단은 그냥 가져오자
         white_image_index = ["9", "30", "38", "47", "89", "91"]
-        test_white_image_index = [self.data_args.test_puzzle_num]
-        train_white_image_index = list(set(white_image_index)-set(test_white_image_index))
+        # test_white_image_index = [self.data_args.test_puzzle_num]
+
+        # train_white_image_index = list(set(white_image_index)-set(test_white_image_index))
+        train_white_image_index = white_image_index
+        test_white_image_index = white_image_index
 
         # train 5개, test 1개로 분리
         if self.mode == "train":

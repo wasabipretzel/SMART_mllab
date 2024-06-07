@@ -31,7 +31,7 @@ def get_model(model_args, training_args):
             model = BaseLLMModel(model_args).to(training_args.device)
         elif model_args.llm_pretrained_model_path:
             processor = T5Tokenizer.from_pretrained(model_args.llm_pretrained_model_path)
-            model_config = PretrainedConfig.from_pretrained(model_args.llm_pretrained_model_path)
+            model_config = PretrainedConfig.from_pretrained(training_args.llm_load_ckpt_path)
             model = BaseLLMModel.from_pretrained(pretrained_model_name_or_path=model_args.llm_pretrained_model_path,
                                             config=model_config
                                             ).to(training_args.device)

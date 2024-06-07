@@ -27,12 +27,12 @@ for handler in logger.handlers:
     handler.addFilter(NoWarningFilter()) #To avoid warning msg when generating, add custom filter
 
 
-def make_test_module(data_args, processor=None) -> Dict:
+def make_test_module(data_args, tokenizer=None) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
     # train_dataset = SMART(data_args=data_args, mode='train')
     test_dataset = SMART(data_args=data_args, mode='test')
 
-    data_collator = SMART_collator(processor=processor)
+    data_collator = SMART_collator(tokenizer=tokenizer)
     
     
     return dict(
@@ -66,19 +66,19 @@ def inference():
 
     logger.info("Loading Pretrained model")
     #load model 
-    model, processor = get_model(model_args, training_args)
+    model, tokenizer = get_model(model_args, training_args)
 
     ## DataLoader
-    data_module = get_dataset(model_args, data_args, mode, processor=processor)
+    data_module = get_dataset(model_args, data_args, mode, tokenizer=tokenizer)
 
     embeddings = copy.deepcopy(model.LLM.get_input_embeddings())
-    metric = get_metric(model_args, data_args, processor, embeddings, data_module["eval_dataset"])
+    metric = get_metric(model_args, data_args, tokenizer, embeddings, data_module["eval_dataset"])
 
     trainer = Seq2SeqTrainer(model=model,
                     args=training_args,
                     compute_metrics=metric.compute_metrics,
                     data_collator = data_module["data_collator"],
-                    tokenizer=processor if "flant5" in model_args.llm_model_type else None,
+                    tokenizer=tokenizer if "flant5" in model_args.llm_model_type else None,
                     )
 
 

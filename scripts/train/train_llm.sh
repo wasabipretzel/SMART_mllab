@@ -58,12 +58,12 @@ export PATH=$PATH:path/to/HIP/bin
 #     --run_name instructblip_baseline \
 #     --report_to none
 
-python /home/work/instructblip/SMART_llm/train.py \
+python train.py \
     --output_dir /home/work/instructblip/data/ckpt/ \
     --prediction_type answerkey \
     --llm_model_type flant5 \
     --llm_pretrained_model_path google/flan-t5-xl \
-    --num_train_epochs 100 \
+    --num_train_epochs 50 \
     --use_caption false \
     --per_device_train_batch_size 32 \
     --per_device_eval_batch_size 20 \
@@ -71,7 +71,7 @@ python /home/work/instructblip/SMART_llm/train.py \
     --evaluation_strategy steps \
     --eval_steps 200 \
     --save_strategy no \
-    --save_steps 1 \
+    --save_steps 200 \
     --save_total_limit 20 \
     --pretrained_module_lr 1e-6 \
     --scratch_module_lr 1e-4 \
@@ -80,9 +80,9 @@ python /home/work/instructblip/SMART_llm/train.py \
     --lr_scheduler_type cosine \
     --dataloader_num_workers 4 \
     --project_name SMART_challenge \
-    --run_name instructblip_llm_only_38 \
+    --run_name instructblip_llm_only \
     --test_puzzle_num 9 \
-    --report_to None
+    --report_to none
 
 
 
