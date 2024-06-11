@@ -83,6 +83,13 @@ class DataArguments:
     prediction_type: str=field(default="answerkey") #could be ["answerkey","answervalue"]. answerkey predict one of 'A','B','C','D','E'. answervalue predict float/str value
     background_exclude: bool=False
 
+    # option permutation
+    permutation: bool = False
+    permutation_option: str=field(default='opt-shift') # opt-reverse, opt-shift
+
+    # additional dataset
+    add_data: bool = False
+
     # Caption 실험 argument
     use_caption: bool=False #caption 실험 
     caption_path: str="/data/QWEN_caption/Qwen_caption.json"

@@ -61,6 +61,12 @@ class InstructblipFlant5Dataset(Dataset):
         if self.data_args.category_classification_mapping_path != None:
             self.puzzle_2_category = self.load_category_mapping()
 
+        if data_args.add_data and mode == 'train':
+                add_data = self.process_add_data()
+            add_data = self.generate_option_key(add_data)
+            add_data = self.append_prediction_type(add_data)
+            self.qa_info = self.qa_info + add_data
+
         if self.data_args.use_dynamic_sam_decoder or self.data_args.use_dynamic_sam_encoder: #TODO : sam-vit-huge ckpt 미리 저장해두기 
             self.device=f"cuda:{self.data_args.local_rank}"
             sam_pretrained_model_path = self.data_args.sam_pretrained_model_path if self.data_args.sam_pretrained_model_path is not None else "facebook/sam-vit-huge"
@@ -68,6 +74,20 @@ class InstructblipFlant5Dataset(Dataset):
             self.SAM_model = SamModel.from_pretrained(sam_pretrained_model_path).to(self.device)
             self.SAM_model.eval()
 
+    def process_add_data(self):
+        import dataset.add_dataset as add_dataset
+        res = []
+        res += add_dataset.mathverse_qa_dict 
+        res += add_dataset.mathvision_qa_dict
+        res += add_dataset.iconqa_qa_dict
+        res += add_dataset.scienceqa_qa_dict
+        res += add_dataset.mathvista_qa_dict
+        res += add_dataset.mmstar_qa_dict
+        res += add_dataset.mmbench_qa_dict
+        res += add_dataset.raven_qa_dict
+        res += add_dataset.mmmu_qa_dict
+        print('# samples of additional dataset', len(res))
+        return res
 
     def load_category_mapping(self):
         """
@@ -135,7 +155,50 @@ class InstructblipFlant5Dataset(Dataset):
 
         with open(data_path, 'rb') as f:
             qa_info = pkl.load(f)
+
+        # by yjheo:
+        if self.mode == 'test':
+        data_path = os.path.join(self.data_args.split_path, self.data_args.split_type, 'val.pkl')
+        with open(data_path, 'rb') as f:
+            qa_info_addi = pkl.load(f)
+        qa_info = qa_info + qa_info_addi
+            
         return qa_info
+
+        def option_permutation(self, qa_pair): # 문자가 규칙적이지 않음 options = 'A : 0,2 and 2, B : 1,2 and 9, C : 2, 4 and 9.' 여기서 C처럼 2, 4
+        options = qa_pair['options'][:-1]
+        keys = ['A : ', 'B : ', 'C : ', 'D : ', 'E : ', 'F : ', 'G : ', 'H : ']
+        option_keys = []
+        for key in keys:
+            if key in options:
+                option_keys.append(key[0])
+            options = options.replace(key, '<sep>')
+        options = options.replace(', <sep>', '<sep>')
+        option_values = options.split('<sep>')[1:]
+
+        if option_keys == option_values: # A : A, B : B, C : C, D : D, E : E 같은 경우
+            pass
+
+        else:
+            if self.data_args.permutation_option == 'opt-shift':
+                options = []
+                key_list = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+                random.shuffle(option_values)
+                for i, value in enumerate(option_values):
+                    if key_list[i] in qa_pair:
+                        options.append(f'{key_list[i]} : {value}')
+                        qa_pair[key_list[i]] = value
+                        if str(value) == str(qa_pair['AnswerValue']):
+                            qa_pair['Answer'] = key_list[i]
+                    else:
+                        break
+                qa_pair['options'] = ', '.join(options)+'.'
+
+            elif self.data_args.permutation_option == 'opt-reverse':
+                random.shuffle(options)
+                qa_pair['options'] = ', '.join(options)+'.'
+
+        return qa_pair
 
     def load_image(self, qa_pair):
         """
@@ -169,8 +232,14 @@ class InstructblipFlant5Dataset(Dataset):
         # question = "Question : " + qa_pair["Question"] + 'Options : ' + qa_pair["options"] + ". Answer : "
 
         if self.data_args.use_caption:
-            image_name = qa_pair["image"]
-            caption_value = self.caption_info[image_name]["caption"]
+            try:
+                if 'caption' not in qa_pair:
+                    image_name = qa_pair["image"]
+                    caption_value = self.caption_info[image_name]["caption"]
+                else:
+                    caption_value = qa_pair['caption']
+            except:
+                caption_value = ''
             # if len(caption_value.split()) <= self.caption_threshold:
             #     caption = "Caption : " + caption_value+'\n'
             # else:
@@ -352,6 +421,13 @@ class InstructblipFlant5Dataset(Dataset):
     def __getitem__(self, idx):
         single_qa_pair = self.qa_info[idx]
         image = self.load_image(single_qa_pair)
+
+        try:
+            if self.data_args.permutation:
+                single_qa_pair = self.option_permutation(single_qa_pair)
+        except:
+            print('single_qa_pair', single_qa_pair)
+
         text_input = self.get_input_text(single_qa_pair)
         text_output = self.get_output_text(single_qa_pair) 
         # qformer_input_text = self.get_qformer_input_text(single_qa_pair)
@@ -359,21 +435,27 @@ class InstructblipFlant5Dataset(Dataset):
         option_values = self.get_option_values(single_qa_pair)
 
         # for sam feature
-        if self.data_args.sam_feature_path != None:
-            sam_feature = self.get_sam_feature(single_qa_pair)
-        else:
-            sam_feature = None
+        if pid is not None:
+            if self.data_args.sam_feature_path != None:
+                sam_feature = self.get_sam_feature(single_qa_pair)
+            else:
+                sam_feature = None
 
-        if self.data_args.use_dynamic_sam_decoder == True:
-            sam_feature = self.extract_sam_decoder_feat(image)
-        elif self.data_args.use_dynamic_sam_encoder == True:
-            sam_feature = self.extract_sam_encoder_feat(image)
+            if self.data_args.use_dynamic_sam_decoder == True:
+                sam_feature = self.extract_sam_decoder_feat(image)
+            elif self.data_args.use_dynamic_sam_encoder == True:
+                sam_feature = self.extract_sam_encoder_feat(image)
 
-        if self.data_args.SAM_token_mask:
-            image_attention_mask = self.get_token_mask(single_qa_pair)
-        
-        if self.data_args.category_classification_mapping_path != None:
-            gt_category_num = self.get_category_num(single_qa_pair)
+            if self.data_args.SAM_token_mask:
+                image_attention_mask = self.get_token_mask(single_qa_pair)
+            
+            if self.data_args.category_classification_mapping_path != None:
+                gt_category_num = self.get_category_num(single_qa_pair)
+        if pid is None:
+            if self.data_args.sam_feature_path != None:
+                sam_feature = self.get_sam_feature_adddata(single_qa_pair)
+            else:
+                sam_feature = None
             
         data = {
             'pixel_values' : image,
